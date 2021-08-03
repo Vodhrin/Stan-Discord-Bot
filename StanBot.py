@@ -24,6 +24,7 @@ nlp = spacy.load("en_core_web_lg")
 
 messages_to_delete = []
 message_combat_bodies = []
+message_combat_messages = []
 
 @client.event
 async def on_ready():
@@ -84,7 +85,7 @@ async def on_message(message):
 		os.remove(filename)
 
 	#stan fight
-	if message.content.startswith("!fight") or message.content.startswith("!attack"):
+	if (message.content.startswith("!fight") or message.content.startswith("!attack")) and message.channel.permissions_for(message.guild.me).manage_messages:
 		await message_combat(message)
 		return
 
@@ -567,6 +568,13 @@ async def message_combat(message):
 			#pick random dmg
 			damage = random.randrange(0, 50)
 
+			#print combat image
+			filename = "cache/" + hashlib.md5(message.jump_url.encode()).hexdigest() + ".png"
+			image = await create_combat_image(message_combat_body)
+			image.save(filename)
+			await message.channel.send(file=discord.File(filename, "rapedbystan.png"))
+			os.remove(filename)
+
 			#initial attack acknowledgement
 			await message.channel.send("_You attacked Stan's " + body_part.name + " for " + str(damage) + " damage!_")
 			await message.channel.trigger_typing()
@@ -613,8 +621,9 @@ async def message_combat(message):
 
 				#if stan's health is now below 500 he overall dies
 				if message_combat_body.get_current_total_health() < 500:
+					message_combat_bodies.remove(message_combat_body)
 					message_combat_body.die()
-					await message.channel.send(replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!"))
+					await message.channel.send(replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!_"))
 					await message.channel.trigger_typing()
 					await asyncio.sleep(1.5)
 					await message.channel.send(replace_text_tags("**I will return, you <a> <ns> <adds>.**"))
@@ -628,36 +637,86 @@ async def message_combat(message):
 					await message.channel.send(replace_text_tags("**Oh god, my " + significant_part.name + "! It looks like a <vpa> <a> <ns> now!**"))
 					return
 
-async def create_combat_image():
+async def create_combat_image(body):
 
 	image_background = Image.open("images/background.png").convert("RGBA")
 	image_head = Image.open("images/stanface.png").convert("RGBA")
 	image_torso = Image.open("images/body_parts/torso.png").convert("RGBA")
 	image_arm_right = Image.open("images/body_parts/arm_right.png").convert("RGBA")
 	image_arm_left = Image.open("images/body_parts/arm_left.png").convert("RGBA")
+	image_hand_right = Image.open("images/body_parts/hand_right.png").convert("RGBA")
+	image_hand_left = Image.open("images/body_parts/hand_left.png").convert("RGBA")
 	image_fingers_right = Image.open("images/body_parts/fingers_right.png").convert("RGBA")
 	image_fingers_left = Image.open("images/body_parts/fingers_left.png").convert("RGBA")
 	image_leg_right = Image.open("images/body_parts/leg_right.png").convert("RGBA")
 	image_leg_left = Image.open("images/body_parts/leg_left.png").convert("RGBA")
 	image_toes_right = Image.open("images/body_parts/toes_right.png").convert("RGBA")
 	image_toes_left = Image.open("images/body_parts/toes_left.png").convert("RGBA")
+	image_ass_cheek = Image.open("images/body_parts/ass_cheek.png").convert("RGBA")
 	image_penis = Image.open("images/body_parts/penis.png").convert("RGBA")
 	image_testicles = Image.open("images/body_parts/testicles.png").convert("RGBA")
-	image_healthbar = Image.open("images/healthbar/1.png").convert("RGBA")
+
+	mult = (body.get_current_total_health() - 500) / (body.max_health - 500)
+	file_name = "images/healthbar/" + str(56 - round(mult * 55)) + ".png"  
+
+	image_healthbar = Image.open(file_name).convert("RGBA")
 
 	composite = image_background
-	await add_body_image(composite, image_head, (512, 192), False)
-	await add_body_image(composite, image_torso, (512, 448), True,getrgb("white"))
-	await add_body_image(composite, image_arm_right, (352, 352), True, getrgb("white"))
-	await add_body_image(composite, image_arm_left, (672, 352), True, getrgb("white"))
-	await add_body_image(composite, image_fingers_right, (832, 352), True, getrgb("white"))
-	await add_body_image(composite, image_fingers_left, (192, 352), True, getrgb("white"))
-	await add_body_image(composite, image_leg_right, (640, 672), True, getrgb("white"))
-	await add_body_image(composite, image_leg_left, (384, 672), True, getrgb("white"))
-	await add_body_image(composite, image_toes_right, (672, 768), True, getrgb("white"))
-	await add_body_image(composite, image_toes_left, (352, 768), True, getrgb("white"))
-	await add_body_image(composite, image_penis, (512, 640), True, getrgb("white"))
-	await add_body_image(composite, image_testicles, (512, 608), True, getrgb("white"))
+
+	if body.head.is_alive():
+		await add_body_image(composite, image_head, (512, 192), False)
+
+	if body.arm_right.is_alive():
+		await add_body_image(composite, image_arm_right, (352, 352), True, await get_color(body.arm_right))
+
+	if body.arm_left.is_alive():
+		await add_body_image(composite, image_arm_left, (672, 352), True, await get_color(body.arm_left))
+
+	if body.hand_right.is_alive():
+		await add_body_image(composite, image_hand_right, (800, 352), True, await get_color(body.hand_right))
+
+	if body.hand_left.is_alive():
+		await add_body_image(composite, image_hand_left, (224, 352), True, await get_color(body.hand_left))
+
+	if body.fingers_right.is_alive():
+		await add_body_image(composite, image_fingers_right, (832, 352), True, await get_color(body.fingers_right))
+
+	if body.fingers_left.is_alive():
+		await add_body_image(composite, image_fingers_left, (192, 352), True, await get_color(body.fingers_left))
+
+	if body.ass_cheek_right.is_alive():
+		await add_body_image(composite, image_ass_cheek, (576, 536), True, await get_color(body.ass_cheek_right))
+
+	if body.ass_cheek_left.is_alive():
+		await add_body_image(composite, image_ass_cheek, (448, 536), True, await get_color(body.ass_cheek_left))
+
+	if body.leg_right.is_alive():
+		await add_body_image(composite, image_leg_right, (616, 624), True, await get_color(body.leg_right))
+
+	if body.leg_left.is_alive():
+		await add_body_image(composite, image_leg_left, (408, 624), True, await get_color(body.leg_left))
+
+	if body.foot_right.is_alive():
+		await add_body_image(composite, image_hand_right, (656, 736), True, await get_color(body.foot_right))
+
+	if body.foot_left.is_alive():
+		await add_body_image(composite, image_hand_left, (368, 736), True, await get_color(body.foot_left))
+
+	if body.toes_right.is_alive():
+		await add_body_image(composite, image_toes_right, (672, 768), True, await get_color(body.toes_right))
+
+	if body.toes_left.is_alive():
+		await add_body_image(composite, image_toes_left, (352, 768), True, await get_color(body.toes_left))
+
+	if body.penis.is_alive():
+		await add_body_image(composite, image_penis, (512, 640), True, await get_color(body.penis))
+
+	if body.testicles.is_alive():
+		await add_body_image(composite, image_testicles, (512, 608), True, await get_color(body.testicles))
+
+	if body.torso.is_alive():
+		await add_body_image(composite, image_torso, (512, 448), True, await get_color(body.torso))
+
 	await add_body_image(composite, image_healthbar, (512, 896), False)
 
 	return composite
@@ -674,38 +733,54 @@ async def add_body_image(image_background, image_addition, position, replace=Fal
 		image_addition.putdata(new_image_data)
 	image_background.alpha_composite(image_addition, tuple(map(sub, position, image_offset)))
 
+async def weight_colors(color_1, color_2, weight_towards_color_1):
+
+	w_1 = weight_towards_color_1
+	w_2 = 1 - weight_towards_color_1
+
+	x_1, x_2, x_3 = color_1
+	z_1, z_2, z_3 = color_2
+
+	return (round(x_1*w_1 + z_1*w_2), round(x_2*w_1 + z_2*w_2), round(x_3*w_1 + z_3*w_2))
+
+async def get_color(body_part):
+
+	color = await weight_colors(getrgb("red"), getrgb("white"), 1 - body_part.health / body_part.max_health)
+	return color
+
 class Message_Combat_Body:
 	def __init__(self, channel):
 		self.channel = channel
 
-		self.left_eye = Body_Part("left eye", 25)
-		self.right_eye = Body_Part("left eye", 25)
-		self.left_ear = Body_Part("left ear", 10)
-		self.right_ear = Body_Part("right ear", 10)
+		self.eye_left = Body_Part("left eye", 25)
+		self.eye_right = Body_Part("left eye", 25)
+		self.ear_left = Body_Part("left ear", 10)
+		self.ear_right = Body_Part("right ear", 10)
 		self.nose = Body_Part("nose", 15)
 		self.teeth = Body_Part("teeth", 35)
-		self.head = Body_Part("head", 100, [self.left_eye, self.right_eye, self.left_ear, self.right_ear, self.nose, self.teeth])
-		self.left_fingers = Body_Part("left fingers", 15)
-		self.left_hand = Body_Part("left hand", 50, [self.left_fingers])
-		self.left_arm = Body_Part("left arm", 100, [self.left_hand])
-		self.right_fingers = Body_Part("right fingers", 15)
-		self.right_hand = Body_Part("right hand", 50, [self.right_fingers])
-		self.right_arm = Body_Part("right arm", 100, [self.right_hand])
-		self.left_toes = Body_Part("left toes", 15)
-		self.left_foot = Body_Part("left foot", 50, [self.left_toes])
-		self.left_leg = Body_Part("left leg", 100, [self.left_foot])
-		self.right_toes = Body_Part("right toes", 15)
-		self.right_foot = Body_Part("right foot", 50, [self.right_toes])
-		self.right_leg = Body_Part("right leg", 100, [self.right_foot])
-		self.left_ass_cheek = Body_Part("left ass cheek", 35)
-		self.right_ass_cheek = Body_Part("right ass cheek", 35)
+		self.head = Body_Part("head", 100, [self.eye_left, self.eye_right, self.ear_left, self.ear_right, self.nose, self.teeth])
+		self.fingers_left = Body_Part("left fingers", 15)
+		self.hand_left = Body_Part("left hand", 50, [self.fingers_left])
+		self.arm_left = Body_Part("left arm", 100, [self.hand_left])
+		self.fingers_right = Body_Part("right fingers", 15)
+		self.hand_right = Body_Part("right hand", 50, [self.fingers_right])
+		self.arm_right = Body_Part("right arm", 100, [self.hand_right])
+		self.toes_left = Body_Part("left toes", 15)
+		self.foot_left = Body_Part("left foot", 50, [self.toes_left])
+		self.leg_left = Body_Part("left leg", 100, [self.foot_left])
+		self.toes_right = Body_Part("right toes", 15)
+		self.foot_right = Body_Part("right foot", 50, [self.toes_right])
+		self.leg_right = Body_Part("right leg", 100, [self.foot_right])
+		self.ass_cheek_left = Body_Part("left ass cheek", 35)
+		self.ass_cheek_right = Body_Part("right ass cheek", 35)
 		self.pubic_hair = Body_Part("pubic hair", 15)
 		self.penis = Body_Part("penis", 15)
 		self.testicles = Body_Part("testicles", 15)
-		self.torso = Body_Part("torso", 300, [self.head, self.left_arm, self.right_arm, self.left_leg, self.right_leg, self.left_ass_cheek, self.right_ass_cheek, self.pubic_hair, self.penis, self.testicles])
+		self.torso = Body_Part("torso", 300, [self.head, self.arm_left, self.arm_right, self.leg_left, self.leg_right, self.ass_cheek_left, self.ass_cheek_right, self.pubic_hair, self.penis, self.testicles])
 
-		self.body_parts = [self.left_eye, self.right_eye, self.left_ear, self.right_ear, self.nose, self.teeth, self.head, self.left_fingers, self.left_hand, self.left_arm, self. right_fingers, self.right_hand, self.right_arm, self.left_toes, self.left_foot, self.left_leg, self.right_toes, self.right_foot, self.right_leg, self.left_ass_cheek, self.right_ass_cheek, self.pubic_hair, self.penis, self.testicles, self.torso]
+		self.body_parts = [self.eye_left, self.eye_right, self.ear_left, self.ear_right, self.nose, self.teeth, self.head, self.fingers_left, self.hand_left, self.arm_left, self. fingers_right, self.hand_right, self.arm_right, self.toes_left, self.foot_left, self.leg_left, self.toes_right, self.foot_right, self.leg_right, self.ass_cheek_left, self.ass_cheek_right, self.pubic_hair, self.penis, self.testicles, self.torso]
 
+		self.max_health = self.get_current_total_health()
 
 	def get_current_total_health(self):
 		number = 0
@@ -732,6 +807,11 @@ class Body_Part:
 	def change_state(self, new_state):
 		self.state = new_state
 		return self.state
+
+	def is_alive(self):
+		if self.state == Body_Part.states["Dead"]:
+			return False
+		return True
 
 	def damage_part(self, damage):
 		self.health = self.health - damage
