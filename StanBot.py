@@ -13,6 +13,10 @@ from discord.ext import tasks
 from PIL import Image, ImageFilter, ImageFont, ImageDraw
 from PIL.ImageColor import getrgb
 
+from StanLanguage import *
+from StanCombat import *
+from StanCommands import *
+
 TOKEN = open("token.txt","r").readline()
 
 intents = discord.Intents.default()
@@ -20,11 +24,15 @@ intents.members = True
 intents.messages = True
 
 client = discord.Client(intents = intents)
-nlp = spacy.load("en_core_web_lg")
 
 messages_to_delete = []
-message_combat_bodies = []
-message_combat_messages = []
+combat_bodies = []
+combat_messages_instigate = []
+combat_processing_flags = {}
+combat_messages_delete = []
+
+lanuage_init()
+commands_init(client)
 
 @client.event
 async def on_ready():
@@ -56,54 +64,43 @@ async def on_message(message):
 
 	#respond to mentions
 	if client.user.mentioned_in(message):
-		adjectives = open("text/components/adjectives.txt", "r").readlines()
-		nouns = open("text/components/nouns_singular.txt", "r").readlines()
-		addons = open("text/components/addons_singular.txt", "r").readlines()
 
-		adjective = ""
-		if random.randrange(0, 2) == 0:
-			adjective = adjectives[random.randrange(len(adjectives))]
-			adjective = adjective.strip() + " "
+		response = ""
 
-		noun = nouns[random.randrange(len(nouns))].strip()
+		if random.randrange(0, 2) == 1:
+			response += "<a> "
 
-		addon = ""
-		if random.randrange(0, 2) == 0:
-			addon = addons[random.randrange(len(addons))]
-			addon = " " + addon.strip()
+		response += "<ns>"
 
-		response = adjective + noun + addon
-		await message.channel.send(response)
+		if random.randrange(0, 2) == 1:
+			response += " <adds>"
+
+		await message.channel.send(replace_text_tags(response))
 		return
 
-	#test
-	if message.content.startswith("!test"):
-		filename = "cache/" + hashlib.md5(message.jump_url.encode()).hexdigest() + ".png"
-		image = await create_combat_image()
-		image.save(filename)
-		await message.channel.send(file=discord.File(filename, "rapedbystan.png"))
-		os.remove(filename)
+	#stan commands
+	if message.content.startswith("!stan"):
+		admin_ids = open("ids.txt", "r").readlines()
+		general_commands = open("general_commands.txt", "r").readlines()
+		admin_commands = open("admin_commands.txt", "r").readlines()
 
-	#stan fight
-	if (message.content.startswith("!fight") or message.content.startswith("!attack")) and message.channel.permissions_for(message.guild.me).manage_messages:
-		await message_combat(message)
-		return
+		if len(message.content.split()) < 2:
+			return
 
-	#disconnect from voice command
-	if message.content.startswith("!disconnectstan") and message.author.name == "Vodhr":
-		for voice_client in client.voice_clients:
-			if voice_client.guild is message.author.guild:
-				await voice_client.disconnect()
-				print("Disconnected from voice channel " + voice_client.channel.name)
-				return
+		for i in admin_ids:
+			if str(message.author.id) == i:
+				for i in admin_commands:
+					if i.startswith(message.content.split()[1]):
+						command = i.split(":")[1]
+						await eval(command)
+						return
 
-	#clean command
-	if message.content.startswith("!cleanstanshittery"):
-		for guild in client.guilds:
-			for channel in guild.text_channels:
-				if channel.permissions_for(guild.me).manage_messages:
-					await channel.purge(limit=10, check=is_me)
-					print(channel.name + " in the guild " + guild.name + " has been purged")
+		else:
+			for i in general_commands:
+				if i.startswith(message.content.split()[1]):
+					command = i.split(":")[1]
+					await eval(command)
+					return
 		return
 
 	#respond to usage of word "stan"
@@ -156,6 +153,30 @@ async def on_message(message):
 		phrase = replace_text_tags(phrases[random.randrange(len(phrases))])
 		await message.channel.send(phrase)
 		return
+
+@tasks.loop(seconds = 5)
+async def combat_tick():
+
+	channels = []
+	for i in combat_messages_instigate:
+		if i.channel not in channels:
+			channels.append(i.channel)
+
+	for i in channels:
+
+		if i not in combat_processing_flags:
+			combat_processing_flags[i] = False
+
+		if not combat_processing_flags[i]:
+			message_group = []
+			for o in combat_messages_instigate:
+				if o.channel is i:
+					message_group.append(o)
+
+			for o in message_group:
+				combat_messages_instigate.remove(o)
+
+			await combat_query(message_group, combat_messages_delete, combat_bodies, combat_processing_flags, i)
 
 @tasks.loop(seconds = 60)
 async def periodic_text_action():
@@ -246,593 +267,11 @@ async def periodic_voice_action():
 			 				await voice_client.disconnect()
 			 				return
 
-def replace_text_by_pos_tag(text, replacement, *tags):
-	doc = nlp(text)
-	new_text = ""
-
-	for token in doc:
-		new_word = token.text
-
-		if token.tag_ in tags:
-			if token.is_title:
-				new_word = replacement.capitalize()
-			else:
-				new_word = replacement.lower()
-		new_text += new_word
-		new_text += token.whitespace_
-
-	return new_text
-
-def replace_text_tags(text):
-	adjectives = open("text/components/adjectives.txt", "r").readlines()
-	adjectives_afflication = open("text/components/adjectives_affliction.txt", "r").readlines()
-	adverbs = open("text/components/adverbs.txt", "r").readlines()
-	addons_singular = open("text/components/addons_singular.txt", "r").readlines()
-	addons_plural = open("text/components/addons_plural.txt", "r").readlines()
-	nouns_singular = open("text/components/nouns_singular.txt", "r").readlines()
-	nouns_plural = open("text/components/nouns_plural.txt", "r").readlines()
-	nouns_bodyparts = open("text/components/nouns_bodyparts.txt", "r").readlines()
-	nouns_places_proper = open("text/components/nouns_places_proper.txt", "r").readlines()
-	nouns_places_vague = open("text/components/nouns_places_vague.txt", "r").readlines()
-	nouns_names_full = open("text/components/nouns_names_full.txt", "r").readlines()
-	nouns_names_first_male = open("text/components/nouns_names_first_male.txt", "r").readlines()
-	nouns_names_first_female = open("text/components/nouns_names_first_female.txt", "r").readlines()
-	nouns_names_last = open("text/components/nouns_names_last.txt", "r").readlines()
-	verbs_past = open("text/components/verbs_past.txt", "r").readlines()
-	verbs_present = open("text/components/verbs_present.txt", "r").readlines()
-	verbs_future = open("text/components/verbs_future.txt", "r").readlines()
-
-	capitalization_flag = False
-	if text.find("<") == 0:
-		capitalization_flag = True
-
-	new_text = text
-
-	while "<a>" in new_text:
-		word = adjectives[random.randrange(len(adjectives))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<a>", word, 1)
-
-	while "<aa>" in new_text:
-		word = adjectives_afflication[random.randrange(len(adjectives_afflication))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<aa>", word, 1)
-
-	while "<ad>" in new_text:
-		word = adverbs[random.randrange(len(adverbs))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<ad>", word, 1)
-
-	while "<adds>" in new_text:
-		word = addons_singular[random.randrange(len(addons_singular))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<adds>", word, 1)
-
-	while "<addp>" in new_text:
-		word = addons_plural[random.randrange(len(addons_plural))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<addp>", word, 1)
-
-	while "<addf>" in new_text:
-		if random.randrange(0, 2) == 1:
-			word = addons_singular[random.randrange(len(addons_singular))].strip()
-			if capitalization_flag:
-				word = word.capitalize()
-				capitalization_flag = False
-			new_text = new_text.replace("<addf>", word, 1)
-		else:
-			word = addons_plural[random.randrange(len(addons_plural))].strip()
-			if capitalization_flag:
-				word = word.capitalize()
-				capitalization_flag = False
-			new_text = new_text.replace("<addf>", word, 1)
-
-	while "<ns>" in new_text:
-		word = nouns_singular[random.randrange(len(nouns_singular))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<ns>", word, 1)
-
-	while "<np>" in new_text:
-		word = nouns_plural[random.randrange(len(nouns_plural))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<np>", word, 1)
-
-	while "<nf>" in new_text:
-		if random.randrange(0, 2) == 1:
-			word = nouns_singular[random.randrange(len(nouns_singular))].strip()
-			if capitalization_flag:
-				word = word.capitalize()
-				capitalization_flag = False
-			new_text = new_text.replace("<nf>", word, 1)
-		else:
-			word = nouns_plural[random.randrange(len(nouns_plural))].strip()
-			if capitalization_flag:
-				word = word.capitalize()
-				capitalization_flag = False
-			new_text = new_text.replace("<nf>", word, 1)
-
-	while "<nbp>" in new_text:
-		word = nouns_bodyparts[random.randrange(len(nouns_bodyparts))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nbp>", word, 1)
-
-	while "<nplp>" in new_text:
-		word = nouns_places_proper[random.randrange(len(nouns_places_proper))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nplp>", word, 1)		
-
-	while "<nplv>" in new_text:
-		word = nouns_places_vague[random.randrange(len(nouns_places_vague))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nplv>", word, 1)
-
-	while "<nnf>" in new_text:
-		word = nouns_names_full[random.randrange(len(nouns_names_full))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nnf>", word, 1)
-
-	while "<nnfm>" in new_text:
-		word = nouns_names_first_male[random.randrange(len(nouns_names_first_male))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nnfm>", word, 1)
-
-	while "<nnff>" in new_text:
-		word = nouns_names_first_female[random.randrange(len(nouns_names_first_female))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nnff>", word, 1)
-
-	while "<nnffl>" in new_text:
-		if random.randrange(0, 2) == 1:
-			word = nouns_names_first_male[random.randrange(len(nouns_names_first_male))].strip()
-			if capitalization_flag:
-				word = word.capitalize()
-				capitalization_flag = False
-			new_text = new_text.replace("<nnffl>", word, 1)
-		else:
-			word = nouns_names_first_female[random.randrange(len(nouns_names_first_female))].strip()
-			if capitalization_flag:
-				word = word.capitalize()
-				capitalization_flag = False
-			new_text = new_text.replace("<nnffl>", word, 1)
-
-	while "<nnl>" in new_text:
-		word = nouns_names_last[random.randrange(len(nouns_names_last))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<nnl>", word, 1)
-
-	while "<vpa>" in new_text:
-		word = verbs_past[random.randrange(len(verbs_past))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<vpa>", word, 1)
-
-	while "<vpr>" in new_text:
-		word = verbs_present[random.randrange(len(verbs_present))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<vpr>", word, 1)
-
-	while "<vf>" in new_text:
-		word = verbs_future[random.randrange(len(verbs_future))].strip()
-		if capitalization_flag:
-			word = word.capitalize()
-			capitalization_flag = False
-		new_text = new_text.replace("<vf>", word, 1)
-
-	while "<random>" in new_text:
-		new_text = new_text.replace("<random>", str(random.randrange(1, 1000)), 1)
-
-	return new_text
-
-def advanced_auto_text_replace(text):
-
-	adjectives = open("text/components/adjectives.txt", "r").readlines()
-	adverbs = open("text/components/adverbs.txt", "r").readlines()
-	addons_singular = open("text/components/addons_singular.txt", "r").readlines()
-	addons_plural = open("text/components/addons_plural.txt", "r").readlines()
-	nouns_singular = open("text/components/nouns_singular.txt", "r").readlines()
-	nouns_plural = open("text/components/nouns_plural.txt", "r").readlines()
-	nouns_bodyparts = open("text/components/nouns_bodyparts.txt", "r").readlines()
-	nouns_places_proper = open("text/components/nouns_places_proper.txt", "r").readlines()
-	nouns_places_vague = open("text/components/nouns_places_vague.txt", "r").readlines()
-	nouns_names_full = open("text/components/nouns_names_full.txt", "r").readlines()
-	nouns_names_first_male = open("text/components/nouns_names_first_male.txt", "r").readlines()
-	nouns_names_first_female = open("text/components/nouns_names_first_female.txt", "r").readlines()
-	nouns_names_last = open("text/components/nouns_names_last.txt", "r").readlines()
-	verbs_past = open("text/components/verbs_past.txt", "r").readlines()
-	verbs_past_participle = open("text/components/verbs_past_participle.txt", "r").readlines()
-	verbs_present = open("text/components/verbs_present.txt", "r").readlines()
-	verbs_future = open("text/components/verbs_future.txt", "r").readlines()
-	verbs_gerund = open("text/components/verbs_gerund.txt", "r").readlines()
-
-	doc = nlp(text)
-
-	new_text = ""
-
-	for token in doc:
-		new_word = token.text
-
-		if token.tag_ == "NN" and not token.is_stop:
-			new_word = nouns_singular[random.randrange(len(nouns_singular))].strip()
-
-		if token.tag_ == "NNS" and not token.is_stop:
-			new_word = nouns_plural[random.randrange(len(nouns_plural))].strip()
-
-		if token.tag_ == "JJ" and  not token.is_stop:
-			new_word = adjectives[random.randrange(len(adjectives))].strip()
-
-		if token.tag_ == "VB" and not token.is_stop:
-			new_word = verbs_present[random.randrange(len(verbs_present))].strip()
-
-		if token.tag_ == "VBD" and not token.is_stop:
-			new_word = verbs_past[random.randrange(len(verbs_past))].strip()
-
-		if token.tag_ == "VBG" and not token.is_stop:
-			new_word = verbs_gerund[random.randrange(len(verbs_gerund))].strip()
-
-		if token.tag_ == "VBN" and not token.is_stop:
-			new_word = verbs_past_participle[random.randrange(len(verbs_past_participle))].strip()
-
-		if token.is_title:
-			new_word = new_word.capitalize()
-
-		new_text += new_word
-		new_text += token.whitespace_
-
-	return new_text
-
-def is_me(m):
-	
-    return m.author == client.user
-
 def get_cum_filenames():
 
 	return os.listdir("audio/cum_lines")
 
-async def message_combat(message):
-
-	message_combat_body = None
-
-	#starting fight
-	if message.content.startswith("!fight"):
-		already_fighting = False
-		for i in message_combat_bodies:
-			if i.channel is message.channel:
-				already_fighting = True
-
-		#dont start a fight in this channel if there is already one going on
-		if already_fighting:
-			await message.channel.send("We're already fighting, retarded faggot.")
-			return
-		#start fight by instantiating a new body and adding it to list of bodies
-		else:
-			message_combat_body = Message_Combat_Body(message.channel)
-			message_combat_bodies.append(message_combat_body)
-			await message.channel.send("Lets go, nigger.")
-			return
-
-	#attacking
-	if message.content.startswith("!attack"):
-		in_fight = False
-		for i in message_combat_bodies:
-			if i.channel is message.channel:
-				message_combat_body = i
-				in_fight = True
-
-		#tell user to start a fight first
-		if not in_fight:
-			await message.channel.send("Start a fight first, retard.")
-			return
-		#actual attack code
-		else:
-			viable_body_parts = []
-
-			#make a list of only currently living bodyparts
-			for i in message_combat_body.body_parts:
-				if i.state != Body_Part.states["Dead"]:
-					viable_body_parts.append(i)
-
-			#pick random bodypart
-			body_part = viable_body_parts[random.randrange(len(viable_body_parts))]
-
-			#pick random dmg
-			damage = random.randrange(0, 50)
-
-			#print combat image
-			filename = "cache/" + hashlib.md5(message.jump_url.encode()).hexdigest() + ".png"
-			image = await create_combat_image(message_combat_body)
-			image.save(filename)
-			await message.channel.send(file=discord.File(filename, "rapedbystan.png"))
-			os.remove(filename)
-
-			#initial attack acknowledgement
-			await message.channel.send("_You attacked Stan's " + body_part.name + " for " + str(damage) + " damage!_")
-			await message.channel.trigger_typing()
-			await asyncio.sleep(1.5)
-			health_after_attack = body_part.damage_part(damage)
-
-			#if body part is still alive
-			if health_after_attack > 0:
-				await message.channel.send("_Stan's " + body_part.name + " now has " + str(health_after_attack) + " health left!_")
-				if random.randrange(0, 3) == 1:
-					await message.channel.trigger_typing()
-					await asyncio.sleep(0.25)
-
-					#random chance to say bodypart has affliction
-					if random.randrange(0, 2) == 1:
-						text = "_Stan's " + body_part.name + " is now <aa>!_"
-					else:
-						text = "_Stan's " + body_part.name + " is now <aa> <ad>!_"
-						await message.channel.send(replace_text_tags(text))
-				return
-
-			#if bodypart died
-			else:
-				dead_parts = body_part.die()
-
-				#if only one bodypart died
-				if len(dead_parts) == 1:
-					await message.channel.send("_Stan's " + body_part.name + " is now " + body_part.change_state(Body_Part.states["Dead"]) + "!_")
-
-				#if multiple died
-				else:
-					text = "_Stan's "
-					counter = 1
-					for i in dead_parts:
-						if counter - len(dead_parts)  != 0:
-							text += i.name + ", "
-							i.change_state(Body_Part.states["Dead"])
-							counter = counter + 1
-						else: 
-							text += i.name + " "
-							i.change_state(Body_Part.states["Dead"])
-					text += "are now " + Body_Part.states["Dead"] + "!_"
-					await message.channel.send(text)
-
-				#if stan's health is now below 500 he overall dies
-				if message_combat_body.get_current_total_health() < 500:
-					message_combat_bodies.remove(message_combat_body)
-					message_combat_body.die()
-					await message.channel.send(replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!_"))
-					await message.channel.trigger_typing()
-					await asyncio.sleep(1.5)
-					await message.channel.send(replace_text_tags("**I will return, you <a> <ns> <adds>.**"))
-					return
-
-				#random chance to say gay shit when bodypart dies
-				if random.randrange(0, 3) == 1:
-					significant_part = dead_parts[random.randrange(len(dead_parts))]
-					await message.channel.send("_Stan cries out!_")
-					await asyncio.sleep(0.5)
-					await message.channel.send(replace_text_tags("**Oh god, my " + significant_part.name + "! It looks like a <vpa> <a> <ns> now!**"))
-					return
-
-async def create_combat_image(body):
-
-	image_background = Image.open("images/background.png").convert("RGBA")
-	image_head = Image.open("images/stanface.png").convert("RGBA")
-	image_torso = Image.open("images/body_parts/torso.png").convert("RGBA")
-	image_arm_right = Image.open("images/body_parts/arm_right.png").convert("RGBA")
-	image_arm_left = Image.open("images/body_parts/arm_left.png").convert("RGBA")
-	image_hand_right = Image.open("images/body_parts/hand_right.png").convert("RGBA")
-	image_hand_left = Image.open("images/body_parts/hand_left.png").convert("RGBA")
-	image_fingers_right = Image.open("images/body_parts/fingers_right.png").convert("RGBA")
-	image_fingers_left = Image.open("images/body_parts/fingers_left.png").convert("RGBA")
-	image_leg_right = Image.open("images/body_parts/leg_right.png").convert("RGBA")
-	image_leg_left = Image.open("images/body_parts/leg_left.png").convert("RGBA")
-	image_toes_right = Image.open("images/body_parts/toes_right.png").convert("RGBA")
-	image_toes_left = Image.open("images/body_parts/toes_left.png").convert("RGBA")
-	image_ass_cheek = Image.open("images/body_parts/ass_cheek.png").convert("RGBA")
-	image_penis = Image.open("images/body_parts/penis.png").convert("RGBA")
-	image_testicles = Image.open("images/body_parts/testicles.png").convert("RGBA")
-
-	mult = (body.get_current_total_health() - 500) / (body.max_health - 500)
-	file_name = "images/healthbar/" + str(56 - round(mult * 55)) + ".png"  
-
-	image_healthbar = Image.open(file_name).convert("RGBA")
-
-	composite = image_background
-
-	if body.head.is_alive():
-		await add_body_image(composite, image_head, (512, 192), False)
-
-	if body.arm_right.is_alive():
-		await add_body_image(composite, image_arm_right, (352, 352), True, await get_color(body.arm_right))
-
-	if body.arm_left.is_alive():
-		await add_body_image(composite, image_arm_left, (672, 352), True, await get_color(body.arm_left))
-
-	if body.hand_right.is_alive():
-		await add_body_image(composite, image_hand_right, (800, 352), True, await get_color(body.hand_right))
-
-	if body.hand_left.is_alive():
-		await add_body_image(composite, image_hand_left, (224, 352), True, await get_color(body.hand_left))
-
-	if body.fingers_right.is_alive():
-		await add_body_image(composite, image_fingers_right, (832, 352), True, await get_color(body.fingers_right))
-
-	if body.fingers_left.is_alive():
-		await add_body_image(composite, image_fingers_left, (192, 352), True, await get_color(body.fingers_left))
-
-	if body.ass_cheek_right.is_alive():
-		await add_body_image(composite, image_ass_cheek, (576, 536), True, await get_color(body.ass_cheek_right))
-
-	if body.ass_cheek_left.is_alive():
-		await add_body_image(composite, image_ass_cheek, (448, 536), True, await get_color(body.ass_cheek_left))
-
-	if body.leg_right.is_alive():
-		await add_body_image(composite, image_leg_right, (616, 624), True, await get_color(body.leg_right))
-
-	if body.leg_left.is_alive():
-		await add_body_image(composite, image_leg_left, (408, 624), True, await get_color(body.leg_left))
-
-	if body.foot_right.is_alive():
-		await add_body_image(composite, image_hand_right, (656, 736), True, await get_color(body.foot_right))
-
-	if body.foot_left.is_alive():
-		await add_body_image(composite, image_hand_left, (368, 736), True, await get_color(body.foot_left))
-
-	if body.toes_right.is_alive():
-		await add_body_image(composite, image_toes_right, (672, 768), True, await get_color(body.toes_right))
-
-	if body.toes_left.is_alive():
-		await add_body_image(composite, image_toes_left, (352, 768), True, await get_color(body.toes_left))
-
-	if body.penis.is_alive():
-		await add_body_image(composite, image_penis, (512, 640), True, await get_color(body.penis))
-
-	if body.testicles.is_alive():
-		await add_body_image(composite, image_testicles, (512, 608), True, await get_color(body.testicles))
-
-	if body.torso.is_alive():
-		await add_body_image(composite, image_torso, (512, 448), True, await get_color(body.torso))
-
-	await add_body_image(composite, image_healthbar, (512, 896), False)
-
-	return composite
-
-async def add_body_image(image_background, image_addition, position, replace=False, color=getrgb("white")):
-	image_offset = (round(image_addition.width/2), round(image_addition.height/2))
-	new_image_data = []
-	if replace:
-		for i in image_addition.getdata():
-			if i[3] > 0:
-				new_image_data.append(color)
-			else:
-				new_image_data.append(i)
-		image_addition.putdata(new_image_data)
-	image_background.alpha_composite(image_addition, tuple(map(sub, position, image_offset)))
-
-async def weight_colors(color_1, color_2, weight_towards_color_1):
-
-	w_1 = weight_towards_color_1
-	w_2 = 1 - weight_towards_color_1
-
-	x_1, x_2, x_3 = color_1
-	z_1, z_2, z_3 = color_2
-
-	return (round(x_1*w_1 + z_1*w_2), round(x_2*w_1 + z_2*w_2), round(x_3*w_1 + z_3*w_2))
-
-async def get_color(body_part):
-
-	color = await weight_colors(getrgb("red"), getrgb("white"), 1 - body_part.health / body_part.max_health)
-	return color
-
-class Message_Combat_Body:
-	def __init__(self, channel):
-		self.channel = channel
-
-		self.eye_left = Body_Part("left eye", 25)
-		self.eye_right = Body_Part("left eye", 25)
-		self.ear_left = Body_Part("left ear", 10)
-		self.ear_right = Body_Part("right ear", 10)
-		self.nose = Body_Part("nose", 15)
-		self.teeth = Body_Part("teeth", 35)
-		self.head = Body_Part("head", 100, [self.eye_left, self.eye_right, self.ear_left, self.ear_right, self.nose, self.teeth])
-		self.fingers_left = Body_Part("left fingers", 15)
-		self.hand_left = Body_Part("left hand", 50, [self.fingers_left])
-		self.arm_left = Body_Part("left arm", 100, [self.hand_left])
-		self.fingers_right = Body_Part("right fingers", 15)
-		self.hand_right = Body_Part("right hand", 50, [self.fingers_right])
-		self.arm_right = Body_Part("right arm", 100, [self.hand_right])
-		self.toes_left = Body_Part("left toes", 15)
-		self.foot_left = Body_Part("left foot", 50, [self.toes_left])
-		self.leg_left = Body_Part("left leg", 100, [self.foot_left])
-		self.toes_right = Body_Part("right toes", 15)
-		self.foot_right = Body_Part("right foot", 50, [self.toes_right])
-		self.leg_right = Body_Part("right leg", 100, [self.foot_right])
-		self.ass_cheek_left = Body_Part("left ass cheek", 35)
-		self.ass_cheek_right = Body_Part("right ass cheek", 35)
-		self.pubic_hair = Body_Part("pubic hair", 15)
-		self.penis = Body_Part("penis", 15)
-		self.testicles = Body_Part("testicles", 15)
-		self.torso = Body_Part("torso", 300, [self.head, self.arm_left, self.arm_right, self.leg_left, self.leg_right, self.ass_cheek_left, self.ass_cheek_right, self.pubic_hair, self.penis, self.testicles])
-
-		self.body_parts = [self.eye_left, self.eye_right, self.ear_left, self.ear_right, self.nose, self.teeth, self.head, self.fingers_left, self.hand_left, self.arm_left, self. fingers_right, self.hand_right, self.arm_right, self.toes_left, self.foot_left, self.leg_left, self.toes_right, self.foot_right, self.leg_right, self.ass_cheek_left, self.ass_cheek_right, self.pubic_hair, self.penis, self.testicles, self.torso]
-
-		self.max_health = self.get_current_total_health()
-
-	def get_current_total_health(self):
-		number = 0
-		for i in self.body_parts:
-			number += i.health
-		return number
-
-	def die(self):
-		for i in self.body_parts:
-			del i
-		del self
-
-class Body_Part:
-
-	states = {"Alive":"healthy and functional", "Dead":"destroyed", "Damaged":"damaged"}
-
-	def __init__(self, name, max_health, dependent_parts=[]):
-		self.name = name
-		self.max_health = max_health
-		self.health = self.max_health
-		self.dependent_parts = dependent_parts
-		self.state = Body_Part.states["Alive"]
-
-	def change_state(self, new_state):
-		self.state = new_state
-		return self.state
-
-	def is_alive(self):
-		if self.state == Body_Part.states["Dead"]:
-			return False
-		return True
-
-	def damage_part(self, damage):
-		self.health = self.health - damage
-		return self.health
-
-	def heal_part(self, amount):
-		self.health = self.health + amount
-		if self.health > self.max_health:
-			self.health = self.max_health
-		return self.health
-
-	def die(self):
-		dead_parts = [self]
-		self.change_state(Body_Part.states["Dead"])
-		self.health = 0
-		for i in self.dependent_parts:
-			i.health = 0
-			i.die()
-			dead_parts.append(i)
-		return dead_parts
-
+combat_tick.start()
 periodic_voice_action.start()
 periodic_text_action.start()
 client.run(TOKEN)
