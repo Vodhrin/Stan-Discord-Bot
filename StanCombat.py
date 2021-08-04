@@ -100,28 +100,46 @@ async def combat_update(messages_attackers, channel, messages, body):
 	#generate a list of attacks, one for each attacker
 	attacks = []
 	if len(viable_body_parts) > len(attackers):
-		for i in attackers:
+		for i in messages_attackers:
+			mult = 1
+			weapon = ""
+
+			text = i.content.split()
+			del text[0:3]
+			text = " ".join(text)
+
+			if len(i.content.split()) > 3:
+				weapon, mult = get_weapon_info(text)
+
 			index = random.randrange(len(viable_body_parts))
-			damage = random.randrange(0, 50)
+			damage = round(random.randrange(0, 50) * mult)
 			body_part = viable_body_parts[index]
 			del viable_body_parts[index]
 
-			attack = Attack(i, damage, body_part)
+			attack = Attack(i.author, damage, body_part, weapon)
 			attacks.append(attack)
 	else:
-		for i in attackers:
+		for i in messages_attackers:
+			mult = 1
+			weapon = ""
+
+			text = i.content.split()
+			del text[0:3]
+			text = " ".join(text)
+
+			if len(i.content.split()) > 3:
+				weapon, mult = get_weapon_info(text)
+
 			index = random.randrange(len(viable_body_parts))
-			damage = random.randrange(0, 250)
+			damage = round(random.randrange(0, 50) * mult)
 			bopy_part = viable_body_parts[index]
 
-			attack = Attack(i, damage, body_part)
+			attack = Attack(i.author, damage, body_part, weapon)
 			attacks.append(attack)
 
 	#make all of the attacks actually deal damage to the body part objects and save that in their health_left attribute
 	for i in attacks:
 		i.resolve_attack()
-		if i.killed_part:
-			i.update_parts_killed(attack.body_part.die())
 
 	#print combat image
 	filename = "cache/" + hashlib.md5(messages_attackers[0].jump_url.encode()).hexdigest() + ".png"
@@ -133,16 +151,29 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 	for i in attacks:
 		#initial attack acknowledgement
-		new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " for " + str(i.damage) + " damage!_")
+		new_message = ""
+		vowels = ["a", "e", "i", "o", "u"]
+		if i.weapon == "":
+			new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " for " + str(i.damage) + " damage!_")
+		else:
+			if i.weapon[0] in vowels:
+				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " with an " + i.weapon + " for " + str(i.damage) + " damage!_")
+			else:
+				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " with a " + i.weapon + " for " + str(i.damage) + " damage!_")
 		messages.append(new_message)
 		await channel.trigger_typing()
 		await asyncio.sleep(0.1)
 
 	await asyncio.sleep(1)
 
+	body_parts_affected = []
 	for i in attacks:
-		if not i.killed_part:
-			new_message = await channel.send("_Stan's " + attack.body_part.name + " now has " + str(attack.health_left) + " health left!_")
+		if i.body_part not in body_parts_affected:
+			body_parts_affected.append(i.body_part)
+
+	for i in body_parts_affected:
+		if i.state != Body_Part.states["Dead"]:
+			new_message = await channel.send("_Stan's " + i.name + " now has " + str(i.health) + " health left!_")
 			messages.append(new_message)
 			if random.randrange(0, 3) == 1:
 				await channel.trigger_typing()
@@ -150,46 +181,45 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 				#random chance to say bodypart has affliction
 				if random.randrange(0, 2) == 1:
-					text = "_Stan's " + attack.body_part.name + " is now <aa>!_"
+					text = "**_Stan's " + i.name + " is now <aa>!_**"
 				else:
-					text = "_Stan's " + attack.body_part.name + " is now <aa> <ad>!_"
+					text = "**_Stan's " + i.name + " is now <aa> <ad>!_**"
 				new_message = await channel.send(replace_text_tags(text))
 				messages.append(new_message)
 
-
 	total_parts_killed = []
+	temp = []
 	for i in attacks:
-		if len(i.parts_killed) > 0:
-			total_parts_killed.extend(i.parts_killed)
+		temp.extend(i.parts_killed)
+	for i in temp:
+		if i not in total_parts_killed:
+			total_parts_killed.append(i)
 
-		#if bodypart died
+	text = "_Stan's "
 
-
-			text = "_Stan's "
-
-			#if only one bodypart died
-			if len(attack.parts_killed) == 1:
-				new_message = await channel.send("_Stan's " + attack.body_part.name + " is now " + attack.body_part.change_state(Body_Part.states["Dead"]) + "!_")
-				messages.append(new_message)
-			#if multiple died
-			elif len(attack.parts_killed) == 2:
-				for idx, i in enumerate(attack.parts_killed):
-					text += i.name
-					if idx == 0:
-						text += " and "
-				text += " are now " + Body_Part.states["Dead"] + "!_"
-				new_message = await channel.send(text)
-				messages.append(new_message)
-			else:
-				for idx, i in enumerate(attacks.parts_killed):
-					text += i.name
-					if idx < (len(attacks.parts_killed) - 2):
-						text += ", "
-					if idx == (len(attacks.parts_killed) - 2):
-						text += " and "
-				text += " are now " + Body_Part.states["Dead"] + "!_"
-				new_message = await channel.send(text)
-				messages.append(new_message)
+	#if only one bodypart died
+	if len(total_parts_killed) == 1:
+		new_message = await channel.send("_Stan's " + total_parts_killed[0].name + " is now " + Body_Part.states["Dead"] + "!_")
+		messages.append(new_message)
+	#if multiple died
+	elif len(total_parts_killed) == 2:
+		for idx, i in enumerate(total_parts_killed):
+			text += i.name
+			if idx == 0:
+				text += " and "
+		text += " are now " + Body_Part.states["Dead"] + "!_"
+		new_message = await channel.send(text)
+		messages.append(new_message)
+	elif len(total_parts_killed) > 2:
+		for idx, i in enumerate(total_parts_killed):
+			text += i.name
+			if idx < (len(total_parts_killed) - 2):
+				text += ", "
+			if idx == (len(total_parts_killed) - 2):
+				text += " and "
+		text += " are now " + Body_Part.states["Dead"] + "!_"
+		new_message = await channel.send(text)
+		messages.append(new_message)
 
 	#random chance to say gay shit when bodypart dies
 	if len(total_parts_killed) > 0:
@@ -367,6 +397,16 @@ def get_composite_subject(members):
 	text += " "
 	return text
 
+def get_weapon_info(name):
+	infos = open("text/weapon_attributes.txt", "r").readlines()
+
+	info = infos[random.randrange(len(infos))]
+
+	full_name = info.split(":")[0] + " " + name
+	mult = float(info.split(":")[1].strip())
+
+	return (full_name, mult)
+
 class Combat_Body:
 	def __init__(self, channel):
 		self.channel = channel
@@ -467,6 +507,7 @@ class Attack:
 		self.health_left = self.body_part.damage_part(self.damage)
 		if self.health_left < 1:
 			self.killed_part = True
+			self.parts_killed = self.body_part.die()
 
 	def update_parts_killed(self, parts):
 		self.parts_killed = parts
