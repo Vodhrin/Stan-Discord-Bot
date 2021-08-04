@@ -63,6 +63,15 @@ async def cmd_sussify(message):
 	text = advanced_auto_text_replace(clean_message(message))
 	await message.channel.send(text)
 
+async def cmd_convert_to_int(message):
+	comps = message.content.split()
+
+	del comps[0:2]
+
+	text = " ".join(comps)
+
+	await message.channel.send(str(int.from_bytes(text.encode(), "little")))
+
 def clean_message(message):
 	words = message.content.split(" ")
 	del words[0:2]
