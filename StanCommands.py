@@ -70,7 +70,7 @@ async def cmd_convert_to_int(message):
 
 	text = " ".join(comps)
 
-	await message.channel.send(str(int.from_bytes(text.encode(), "little")))
+	await message.channel.send(str(int.from_bytes(text.encode(), "little"))[0:2])
 
 def clean_message(message):
 	words = message.content.split(" ")

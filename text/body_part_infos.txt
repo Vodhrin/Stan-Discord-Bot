@@ -1,0 +1,27 @@
+eye_r:right eye,25
+eye_l:left eye,25
+ear_r:right ear,10
+ear_l:left ear,10
+nose:nose,15
+teeth:teeth,35
+head:head,100
+fingers_r:right fingers,15
+fingers_l:left fingers,15
+hand_r:right hand,50
+hand_l:left hand,50
+arm_r:right arm,100
+arm_l:left arm,100
+nipple_r:right nipple,15
+nipple_l:left nipple,15
+toes_r:right toes,15
+toes_l:left toes,15
+foot_r:right foot,50
+foot_l:left foot,50
+leg_r:right leg,100
+leg_l:left leg,100
+ass_cheek_r:right ass cheek,35
+ass_cheek_l:left ass cheek,35
+pubic_hair:pubic hair,15
+penis:penis,15
+testicles:testicles,15
+torso:torso,300

@@ -1,0 +1,10 @@
+head:eye_r,eye_l,ear_r,ear_l,nose,teeth
+hand_r:fingers_r
+hand_l:fingers_l
+arm_r:hand_r
+arm_l:hand_l
+foot_r:toes_r
+foot_l:toes_l
+leg_r:foot_r
+leg_l:foot_l
+torso:head,arm_r,arm_l,foot_r,foot_l,nipple_r,nipple_l,pubic_hair,penis,testicles,ass_cheek_r,ass_cheek_l

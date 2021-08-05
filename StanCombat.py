@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import os
 import numpy
+import math
 from operator import sub
 from PIL import Image, ImageFilter, ImageFont, ImageDraw
 from PIL.ImageColor import getrgb
@@ -87,6 +88,7 @@ async def combat_start(channel, messages, bodies):
 
 async def combat_update(messages_attackers, channel, messages, body):
 
+	overall_message = ""
 	attackers = []
 	for i in messages_attackers:
 		attackers.append(i.author)
@@ -113,6 +115,10 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 			index = random.randrange(len(viable_body_parts))
 			damage = round(random.randrange(0, 50) * mult)
+			if weapon != "":	
+				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
+				damage = round((num / 2) * mult)
+				
 			body_part = viable_body_parts[index]
 			del viable_body_parts[index]
 
@@ -137,7 +143,25 @@ async def combat_update(messages_attackers, channel, messages, body):
 			attack = Attack(i.author, damage, body_part, weapon)
 			attacks.append(attack)
 
-	#make all of the attacks actually deal damage to the body part objects and save that in their health_left attribute
+	#determine if each attack hits other parts around it (total damage stays the same, just split among the parts)
+	for i in attacks:
+		find_more_parts = True
+		new_parts = i.body_part.related_parts
+
+		for i in new_parts:
+			if i.state == Body_Part.states["Dead"]:
+				new_parts.remove(i)
+
+		while new_parts:
+			idx = 0
+			if len(new_parts) != 1:
+				idx = random.randrange(len(new_parts))
+
+			if random.randrange(0, 3) == 1:
+				i.additional_body_parts.append(new_parts[idx])
+			del new_parts[idx]
+
+	#make all of the attacks actually deal damage to the body part(s) objects and save that in their health_left attribute
 	for i in attacks:
 		i.resolve_attack()
 
@@ -152,14 +176,22 @@ async def combat_update(messages_attackers, channel, messages, body):
 	for i in attacks:
 		#initial attack acknowledgement
 		new_message = ""
+		maybe_total = ""
+		parts = [i.body_part]
+		parts.extend(i.additional_body_parts)
+		names = []
+		for o in parts:
+			names.append(o.name)
+		if len(parts) > 1:
+			maybe_total = " total"
 		vowels = ["a", "e", "i", "o", "u"]
 		if i.weapon == "":
-			new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " for " + str(i.damage) + " damage!_")
+			new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " for " + str(i.damage) + maybe_total + " damage!_")
 		else:
 			if i.weapon[0] in vowels:
-				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " with an " + i.weapon + " for " + str(i.damage) + " damage!_")
+				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with an " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_")
 			else:
-				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + i.body_part.name + " with a " + i.weapon + " for " + str(i.damage) + " damage!_")
+				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with a " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_")
 		messages.append(new_message)
 		await channel.trigger_typing()
 		await asyncio.sleep(0.1)
@@ -170,6 +202,9 @@ async def combat_update(messages_attackers, channel, messages, body):
 	for i in attacks:
 		if i.body_part not in body_parts_affected:
 			body_parts_affected.append(i.body_part)
+		for o in i.additional_body_parts:
+			if o not in body_parts_affected:
+				body_parts_affected.append(o)
 
 	for i in body_parts_affected:
 		if i.state != Body_Part.states["Dead"]:
@@ -267,11 +302,10 @@ async def create_combat_image(body):
 
 	image_background = Image.open("images/background.png").convert("RGBA")
 	image_head = Image.open("images/stanface.png").convert("RGBA")
+	image_ear = Image.open("images/body_parts/ear.png").convert("RGBA")
 	image_torso = Image.open("images/body_parts/torso.png").convert("RGBA")
-	image_arm_right = Image.open("images/body_parts/arm_right.png").convert("RGBA")
-	image_arm_left = Image.open("images/body_parts/arm_left.png").convert("RGBA")
-	image_hand_right = Image.open("images/body_parts/hand_right.png").convert("RGBA")
-	image_hand_left = Image.open("images/body_parts/hand_left.png").convert("RGBA")
+	image_arm = Image.open("images/body_parts/arm.png").convert("RGBA")
+	image_hand = Image.open("images/body_parts/hand.png").convert("RGBA")
 	image_fingers_right = Image.open("images/body_parts/fingers_right.png").convert("RGBA")
 	image_fingers_left = Image.open("images/body_parts/fingers_left.png").convert("RGBA")
 	image_leg_right = Image.open("images/body_parts/leg_right.png").convert("RGBA")
@@ -290,49 +324,55 @@ async def create_combat_image(body):
 	composite = image_background
 
 	if body.head.is_alive():
-		await add_body_image(composite, image_head, (512, 192), False)
+		await add_head_stan_image(composite, (512, 192), body)
 
-	if body.arm_right.is_alive():
-		await add_body_image(composite, image_arm_right, (352, 352), True, await get_color(body.arm_right))
+	if body.ear_r.is_alive():
+		await add_body_image(composite, image_ear, (640, 192), True, await get_color(body.ear_r))
 
-	if body.arm_left.is_alive():
-		await add_body_image(composite, image_arm_left, (672, 352), True, await get_color(body.arm_left))
+	if body.ear_l.is_alive():
+		await add_body_image(composite, image_ear, (384, 192), True, await get_color(body.ear_l))
 
-	if body.hand_right.is_alive():
-		await add_body_image(composite, image_hand_right, (800, 352), True, await get_color(body.hand_right))
+	if body.arm_r.is_alive():
+		await add_body_image(composite, image_arm, (672, 352), True, await get_color(body.arm_r))
 
-	if body.hand_left.is_alive():
-		await add_body_image(composite, image_hand_left, (224, 352), True, await get_color(body.hand_left))
+	if body.arm_l.is_alive():
+		await add_body_image(composite, image_arm, (352, 352), True, await get_color(body.arm_l))
 
-	if body.fingers_right.is_alive():
-		await add_body_image(composite, image_fingers_right, (832, 352), True, await get_color(body.fingers_right))
+	if body.hand_r.is_alive():
+		await add_body_image(composite, image_hand, (800, 352), True, await get_color(body.hand_r))
 
-	if body.fingers_left.is_alive():
-		await add_body_image(composite, image_fingers_left, (192, 352), True, await get_color(body.fingers_left))
+	if body.hand_l.is_alive():
+		await add_body_image(composite, image_hand, (224, 352), True, await get_color(body.hand_l))
 
-	if body.ass_cheek_right.is_alive():
-		await add_body_image(composite, image_ass_cheek, (576, 536), True, await get_color(body.ass_cheek_right))
+	if body.fingers_r.is_alive():
+		await add_body_image(composite, image_fingers_right, (832, 352), True, await get_color(body.fingers_r))
 
-	if body.ass_cheek_left.is_alive():
-		await add_body_image(composite, image_ass_cheek, (448, 536), True, await get_color(body.ass_cheek_left))
+	if body.fingers_l.is_alive():
+		await add_body_image(composite, image_fingers_left, (192, 352), True, await get_color(body.fingers_l))
 
-	if body.leg_right.is_alive():
-		await add_body_image(composite, image_leg_right, (616, 624), True, await get_color(body.leg_right))
+	if body.ass_cheek_r.is_alive():
+		await add_body_image(composite, image_ass_cheek, (576, 536), True, await get_color(body.ass_cheek_r))
 
-	if body.leg_left.is_alive():
-		await add_body_image(composite, image_leg_left, (408, 624), True, await get_color(body.leg_left))
+	if body.ass_cheek_l.is_alive():
+		await add_body_image(composite, image_ass_cheek, (448, 536), True, await get_color(body.ass_cheek_l))
 
-	if body.foot_right.is_alive():
-		await add_body_image(composite, image_hand_right, (656, 736), True, await get_color(body.foot_right))
+	if body.leg_r.is_alive():
+		await add_body_image(composite, image_leg_right, (616, 624), True, await get_color(body.leg_r))
 
-	if body.foot_left.is_alive():
-		await add_body_image(composite, image_hand_left, (368, 736), True, await get_color(body.foot_left))
+	if body.leg_l.is_alive():
+		await add_body_image(composite, image_leg_left, (408, 624), True, await get_color(body.leg_l))
 
-	if body.toes_right.is_alive():
-		await add_body_image(composite, image_toes_right, (672, 768), True, await get_color(body.toes_right))
+	if body.foot_r.is_alive():
+		await add_body_image(composite, image_hand, (656, 736), True, await get_color(body.foot_r))
 
-	if body.toes_left.is_alive():
-		await add_body_image(composite, image_toes_left, (352, 768), True, await get_color(body.toes_left))
+	if body.foot_l.is_alive():
+		await add_body_image(composite, image_hand, (368, 736), True, await get_color(body.foot_l))
+
+	if body.toes_r.is_alive():
+		await add_body_image(composite, image_toes_right, (672, 768), True, await get_color(body.toes_r))
+
+	if body.toes_l.is_alive():
+		await add_body_image(composite, image_toes_left, (352, 768), True, await get_color(body.toes_l))
 
 	if body.penis.is_alive():
 		await add_body_image(composite, image_penis, (512, 640), True, await get_color(body.penis))
@@ -374,27 +414,59 @@ async def get_color(body_part):
 	color = await weight_colors(getrgb("red"), getrgb("white"), 1 - body_part.health / body_part.max_health)
 	return color
 
-def get_composite_subject(members):
+async def add_head_stan_image(image_background, position, body):
+
+	head = body.head
+	image = Image.open("images/stanface.png").convert("RGBA")
+	image_offset = (round(image.width/2), round(image.height/2))
+
+	weight = head.health / head.max_health
+
+	new_image_data = []
+
+
+	for i in image.getdata():
+			if i[3] > 0:
+				x, y, z, a = i
+				color_1 = (x, y, z)
+				color_2 = getrgb("red")
+
+				w_1 = weight
+				w_2 = 1 - weight
+
+				x_1, x_2, x_3 = color_1
+				z_1, z_2, z_3 = color_2
+
+				new_color = (round(x_1*w_1 + z_1*w_2), round(x_2*w_1 + z_2*w_2), round(x_3*w_1 + z_3*w_2))
+
+				new_color_alpha = (new_color[0], new_color[1], new_color[2], i[3])
+
+				new_image_data.append(new_color_alpha)
+			else:
+				new_image_data.append(i)
+	image.putdata(new_image_data)
+	image_background.alpha_composite(image, tuple(map(sub, position, image_offset)))
+
+def get_composite_noun(words):
 
 	text = ""
 
-	if len(members) == 1:
-		text += members[0].name
+	if len(words) == 1:
+		text += words[0]
 
-	if len(members) == 2:
-		for idx, i in enumerate(members):
-			text += i.name
+	if len(words) == 2:
+		for idx, i in enumerate(words):
+			text += i
 			if idx == 0:
 				text += " and "
 
-	if len(members) > 2:
-		for idx, i in enumerate(members):
-			text += i.name
-			if idx < (len(members) - 2):
+	if len(words) > 2:
+		for idx, i in enumerate(words):
+			text += i
+			if idx < (len(words) - 2):
 				text += ", "
-			if idx == (len(members) - 2):
+			if idx == (len(words) - 2):
 				text += " and "
-	text += " "
 	return text
 
 def get_weapon_info(name):
@@ -411,35 +483,93 @@ class Combat_Body:
 	def __init__(self, channel):
 		self.channel = channel
 
-		self.eye_left = Body_Part("left eye", 25)
-		self.eye_right = Body_Part("right eye", 25)
-		self.ear_left = Body_Part("left ear", 10)
-		self.ear_right = Body_Part("right ear", 10)
-		self.nose = Body_Part("nose", 15)
-		self.teeth = Body_Part("teeth", 35)
-		self.head = Body_Part("head", 100, [self.eye_left, self.eye_right, self.ear_left, self.ear_right, self.nose, self.teeth])
-		self.fingers_left = Body_Part("left fingers", 15)
-		self.hand_left = Body_Part("left hand", 50, [self.fingers_left])
-		self.arm_left = Body_Part("left arm", 100, [self.hand_left])
-		self.fingers_right = Body_Part("right fingers", 15)
-		self.hand_right = Body_Part("right hand", 50, [self.fingers_right])
-		self.arm_right = Body_Part("right arm", 100, [self.hand_right])
-		self.toes_left = Body_Part("left toes", 15)
-		self.foot_left = Body_Part("left foot", 50, [self.toes_left])
-		self.leg_left = Body_Part("left leg", 100, [self.foot_left])
-		self.toes_right = Body_Part("right toes", 15)
-		self.foot_right = Body_Part("right foot", 50, [self.toes_right])
-		self.leg_right = Body_Part("right leg", 100, [self.foot_right])
-		self.ass_cheek_left = Body_Part("left ass cheek", 35)
-		self.ass_cheek_right = Body_Part("right ass cheek", 35)
-		self.pubic_hair = Body_Part("pubic hair", 15)
-		self.penis = Body_Part("penis", 15)
-		self.testicles = Body_Part("testicles", 15)
-		self.torso = Body_Part("torso", 300, [self.head, self.arm_left, self.arm_right, self.leg_left, self.leg_right, self.ass_cheek_left, self.ass_cheek_right, self.pubic_hair, self.penis, self.testicles])
+		self.eye_r = None
+		self.eye_l = None
+		self.ear_r = None
+		self.ear_l = None
+		self.nose = None
+		self.teeth = None
+		self.head = None
+		self.fingers_r = None
+		self.fingers_l = None
+		self.hand_r = None
+		self.hand_l = None
+		self.arm_r = None
+		self.arm_l = None
+		self.nipple_r = None
+		self.nipple_l = None
+		self.toes_r = None
+		self.toes_l = None
+		self.foot_r = None
+		self.foot_l = None
+		self.leg_r = None
+		self.leg_l = None
+		self.ass_cheek_r = None
+		self.ass_cheek_l = None
+		self.pubic_hair = None
+		self.penis = None
+		self.testicles = None
+		self.torso = None
 
-		self.body_parts = [self.eye_left, self.eye_right, self.ear_left, self.ear_right, self.nose, self.teeth, self.head, self.fingers_left, self.hand_left, self.arm_left, self. fingers_right, self.hand_right, self.arm_right, self.toes_left, self.foot_left, self.leg_left, self.toes_right, self.foot_right, self.leg_right, self.ass_cheek_left, self.ass_cheek_right, self.pubic_hair, self.penis, self.testicles, self.torso]
+		self.body_parts = []
+
+		self.init_body_parts()
 
 		self.max_health = self.get_current_total_health()
+
+	def get(self, attrname):
+		return getattr(self, attrname)
+
+	def set(self, attrname, value):
+		return setattr(self, attrname, value)
+
+	def init_body_parts(self):
+
+		infos = open("text/body_part_infos.txt", "r").readlines()
+		dependencies = open("text/body_part_dependencies.txt", "r").readlines()
+		relations = open("text/body_part_relations.txt", "r").readlines()
+
+		#instantiate all of the parts with only names and health first
+		for i in list(vars(self).keys())[1:28]:
+
+			info = None
+
+			for o in infos:
+				if o.startswith(i):
+					info = o.strip().split(":")[1]
+
+			name = info.split(",")[0]
+			health = int(info.split(",")[1])
+
+			self.set(i, Body_Part(name, health))
+			self.body_parts.append(self.get(i))
+
+		for i in list(vars(self).keys())[1:28]:
+
+			dependents = None
+			relateds = None
+
+			for o in dependencies:
+				if o.startswith(i):
+					dependents = o.strip().split(":")[1]
+
+			for o in relations:
+				if o.startswith(i):
+					relateds = o.strip().split(":")[1]
+
+			dependent_parts = []
+			if dependents != None:
+				for o in dependents.split(","):
+					dependent_parts.append(self.get(o))
+
+			related_parts = []
+			if relateds != None:
+				for o in relateds.split(","):
+					related_parts.append(self.get(o))
+
+			body_part = self.get(i)
+			body_part.dependent_parts = dependent_parts
+			body_part.related_parts = related_parts
 
 	def get_current_total_health(self):
 		number = 0
@@ -456,11 +586,12 @@ class Body_Part:
 
 	states = {"Alive":"healthy and functional", "Dead":"destroyed", "Damaged":"damaged"}
 
-	def __init__(self, name, max_health, dependent_parts=[]):
+	def __init__(self, name, max_health):
 		self.name = name
 		self.max_health = max_health
 		self.health = self.max_health
-		self.dependent_parts = dependent_parts
+		self.dependent_parts = []
+		self.related_parts = []
 		self.state = Body_Part.states["Alive"]
 
 	def change_state(self, new_state):
@@ -493,21 +624,27 @@ class Body_Part:
 		return dead_parts
 
 class Attack:
-	def __init__(self, attacker, damage, body_part, weapon="", adjective=""):
+	def __init__(self, attacker, damage, body_part, weapon=""):
 		self.attacker = attacker
 		self.damage = damage
 		self.body_part = body_part
+		self.additional_body_parts = []
 		self.weapon = weapon
-		self.adjective = adjective
-		self.health_left = 1
-		self.killed_part = False
 		self.parts_killed = []
 
 	def resolve_attack(self):
-		self.health_left = self.body_part.damage_part(self.damage)
-		if self.health_left < 1:
-			self.killed_part = True
-			self.parts_killed = self.body_part.die()
+
+		num = 1 + len(self.additional_body_parts)
+
+		split_damage = math.floor(self.damage / num)
+
+		body_parts_to_resolve = [self.body_part]
+		body_parts_to_resolve.extend(self.additional_body_parts)
+
+		for i in body_parts_to_resolve:
+			i.damage_part(split_damage)
+			if i.health < 1:
+				self.parts_killed.extend(i.die())
 
 	def update_parts_killed(self, parts):
 		self.parts_killed = parts

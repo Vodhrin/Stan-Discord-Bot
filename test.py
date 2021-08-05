@@ -1,8 +1,16 @@
 import spacy
 
-nlp = spacy.load("en_core_web_trf")
-doc = nlp("I ate the entire fucking cake and now my stomach feels like dogshit.")
+nlp = spacy.load("en_core_web_lg")
+doc = nlp("I ate the entire fucking fucnig fuckig and now my stomach feels like dogshit.")
 
-text = ""
-for token in doc:
-    print(token.text, token.tag_, token.dep_)
+print()
+
+vectors = [doc[4].vector, doc[5].vector, doc[6].vector]
+
+for i in vectors:
+    num = 0
+    for o in i:
+        num += o
+
+    avg = num/len(i)
+    print(avg)
