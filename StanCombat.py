@@ -73,7 +73,7 @@ async def combat_query(message_group, messages, bodies, flags, channel):
 			await combat_clear_messages(channel, message_group, messages)
 
 			#run all the actual code to do with fight calculations, combat image, etc
-			await combat_update(messages_attackers, channel, messages, body)
+			await combat_update(messages_attackers, channel, messages, bodies, body)
 			flags[channel] = False
 			return
 
@@ -86,7 +86,7 @@ async def combat_start(channel, messages, bodies):
 	messages.append(new_message)
 	return
 
-async def combat_update(messages_attackers, channel, messages, body):
+async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 	overall_message = ""
 	attackers = []
@@ -118,7 +118,7 @@ async def combat_update(messages_attackers, channel, messages, body):
 			if weapon != "":	
 				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
 				damage = round((num / 2) * mult)
-				
+
 			body_part = viable_body_parts[index]
 			del viable_body_parts[index]
 
@@ -138,6 +138,10 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 			index = random.randrange(len(viable_body_parts))
 			damage = round(random.randrange(0, 50) * mult)
+			if weapon != "":	
+				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
+				damage = round((num / 2) * mult)
+
 			bopy_part = viable_body_parts[index]
 
 			attack = Attack(i.author, damage, body_part, weapon)
@@ -148,9 +152,9 @@ async def combat_update(messages_attackers, channel, messages, body):
 		find_more_parts = True
 		new_parts = i.body_part.related_parts
 
-		for i in new_parts:
-			if i.state == Body_Part.states["Dead"]:
-				new_parts.remove(i)
+		for o in new_parts:
+			if o.state == Body_Part.states["Dead"]:
+				new_parts.remove(o)
 
 		while new_parts:
 			idx = 0
@@ -167,7 +171,7 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 	#print combat image
 	filename = "cache/" + hashlib.md5(messages_attackers[0].jump_url.encode()).hexdigest() + ".png"
-	image = await create_combat_image(body)
+	image = create_combat_image(body)
 	image.save(filename)
 	new_message = await channel.send(file=discord.File(filename, "rapedbystan.png"))
 	messages.append(new_message)
@@ -175,7 +179,6 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 	for i in attacks:
 		#initial attack acknowledgement
-		new_message = ""
 		maybe_total = ""
 		parts = [i.body_part]
 		parts.extend(i.additional_body_parts)
@@ -186,17 +189,12 @@ async def combat_update(messages_attackers, channel, messages, body):
 			maybe_total = " total"
 		vowels = ["a", "e", "i", "o", "u"]
 		if i.weapon == "":
-			new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " for " + str(i.damage) + maybe_total + " damage!_")
+			overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 		else:
 			if i.weapon[0] in vowels:
-				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with an " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_")
+				overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with an " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 			else:
-				new_message = await channel.send("_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with a " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_")
-		messages.append(new_message)
-		await channel.trigger_typing()
-		await asyncio.sleep(0.1)
-
-	await asyncio.sleep(1)
+				overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with a " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 
 	body_parts_affected = []
 	for i in attacks:
@@ -208,19 +206,15 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 	for i in body_parts_affected:
 		if i.state != Body_Part.states["Dead"]:
-			new_message = await channel.send("_Stan's " + i.name + " now has " + str(i.health) + " health left!_")
-			messages.append(new_message)
+			overall_message += "_Stan's " + i.name + " now has " + str(i.health) + " health left!_" + "\n"
 			if random.randrange(0, 3) == 1:
-				await channel.trigger_typing()
-				await asyncio.sleep(0.05)
 
 				#random chance to say bodypart has affliction
 				if random.randrange(0, 2) == 1:
 					text = "**_Stan's " + i.name + " is now <aa>!_**"
 				else:
 					text = "**_Stan's " + i.name + " is now <aa> <ad>!_**"
-				new_message = await channel.send(replace_text_tags(text))
-				messages.append(new_message)
+				overall_message += replace_text_tags(text) + "\n"
 
 	total_parts_killed = []
 	temp = []
@@ -234,8 +228,7 @@ async def combat_update(messages_attackers, channel, messages, body):
 
 	#if only one bodypart died
 	if len(total_parts_killed) == 1:
-		new_message = await channel.send("_Stan's " + total_parts_killed[0].name + " is now " + Body_Part.states["Dead"] + "!_")
-		messages.append(new_message)
+		overall_message += "_Stan's " + total_parts_killed[0].name + " is now " + Body_Part.states["Dead"] + "!_" + "\n"
 	#if multiple died
 	elif len(total_parts_killed) == 2:
 		for idx, i in enumerate(total_parts_killed):
@@ -243,8 +236,7 @@ async def combat_update(messages_attackers, channel, messages, body):
 			if idx == 0:
 				text += " and "
 		text += " are now " + Body_Part.states["Dead"] + "!_"
-		new_message = await channel.send(text)
-		messages.append(new_message)
+		overall_message += text + "\n"
 	elif len(total_parts_killed) > 2:
 		for idx, i in enumerate(total_parts_killed):
 			text += i.name
@@ -253,33 +245,36 @@ async def combat_update(messages_attackers, channel, messages, body):
 			if idx == (len(total_parts_killed) - 2):
 				text += " and "
 		text += " are now " + Body_Part.states["Dead"] + "!_"
-		new_message = await channel.send(text)
-		messages.append(new_message)
+		overall_message += text + "\n"
 
 	#random chance to say gay shit when bodypart dies
 	if len(total_parts_killed) > 0:
 		idx = random.randrange(len(total_parts_killed))
 		if random.randrange(0, 3) == 1:
 			significant_part = total_parts_killed[idx]
-			new_message = await channel.send("_Stan cries out!_")
-			messages.append(new_message)
-			await asyncio.sleep(0.5)
-			new_message = await channel.send(replace_text_tags("**Oh god, my " + significant_part.name + "! It looks like a <vpa> <a> <ns> now!**"))
-			messages.append(new_message)
+			overall_message += "_Stan cries out!_" + "\n"
+			overall_message += replace_text_tags("**Oh god, my " + significant_part.name + "! It looks like a <vpa> <a> <ns> now!**") + "\n"
 
 	#if stan's health is now below 500 he overall dies
-	if body.get_current_total_health() < 500:
-		body.remove(body)
+	overall_health = body.get_current_total_health()
+
+	print(overall_health)
+
+	if overall_health < 500:
+		bodies.remove(body)
 		body.die()
-		new_message = await channel.send(replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!_"))
+		await combat_clear_messages(channel, messages_attackers, messages)
+		overall_message = ""
+		overall_message += replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!_") + "\n"
+		overall_message += replace_text_tags("**I will return, you <a> <ns> <adds>.**") + "\n"
+		new_message = await channel.send(overall_message)
 		messages.append(new_message)
-		await channel.trigger_typing()
-		await asyncio.sleep(1.5)
-		new_message = await channel.send(replace_text_tags("**I will return, you <a> <ns> <adds>.**"))
-		messages.append(new_message)
-		asyncio.sleep(10)
+		await asyncio.sleep(10)
 		await combat_clear_messages(channel, messages_attackers, messages)
 		return
+	
+	new_message = await channel.send(overall_message)
+	messages.append(new_message)
 
 async def combat_clear_messages(channel, message_group, messages):
 
@@ -298,7 +293,7 @@ async def combat_clear_messages(channel, message_group, messages):
 				pass
 	messages.extend(message_group)
 
-async def create_combat_image(body):
+def create_combat_image(body):
 
 	image_background = Image.open("images/background.png").convert("RGBA")
 	image_head = Image.open("images/stanface.png").convert("RGBA")
@@ -316,78 +311,82 @@ async def create_combat_image(body):
 	image_penis = Image.open("images/body_parts/penis.png").convert("RGBA")
 	image_testicles = Image.open("images/body_parts/testicles.png").convert("RGBA")
 
-	mult = (body.get_current_total_health() - 500) / (body.max_health - 500)
-	file_name = "images/healthbar/" + str(56 - round(mult * 55)) + ".png"  
+	file_name = ""
+	if body.get_current_total_health() > 500:
+		mult = (body.get_current_total_health() - 500) / (body.max_health - 500)
+		file_name = "images/healthbar/" + str(56 - round(mult * 55)) + ".png"
+	else:
+		file_name  = "images/healthbar/55.png"
 
 	image_healthbar = Image.open(file_name).convert("RGBA")
 
 	composite = image_background
 
 	if body.head.is_alive():
-		await add_head_stan_image(composite, (512, 192), body)
+		add_head_stan_image(composite, (512, 192), body)
 
 	if body.ear_r.is_alive():
-		await add_body_image(composite, image_ear, (640, 192), True, await get_color(body.ear_r))
+		add_body_image(composite, image_ear, (640, 192), True, get_color(body.ear_r))
 
 	if body.ear_l.is_alive():
-		await add_body_image(composite, image_ear, (384, 192), True, await get_color(body.ear_l))
+		add_body_image(composite, image_ear, (384, 192), True, get_color(body.ear_l))
 
 	if body.arm_r.is_alive():
-		await add_body_image(composite, image_arm, (672, 352), True, await get_color(body.arm_r))
+		add_body_image(composite, image_arm, (672, 352), True, get_color(body.arm_r))
 
 	if body.arm_l.is_alive():
-		await add_body_image(composite, image_arm, (352, 352), True, await get_color(body.arm_l))
+		add_body_image(composite, image_arm, (352, 352), True, get_color(body.arm_l))
 
 	if body.hand_r.is_alive():
-		await add_body_image(composite, image_hand, (800, 352), True, await get_color(body.hand_r))
+		add_body_image(composite, image_hand, (800, 352), True, get_color(body.hand_r))
 
 	if body.hand_l.is_alive():
-		await add_body_image(composite, image_hand, (224, 352), True, await get_color(body.hand_l))
+		add_body_image(composite, image_hand, (224, 352), True, get_color(body.hand_l))
 
 	if body.fingers_r.is_alive():
-		await add_body_image(composite, image_fingers_right, (832, 352), True, await get_color(body.fingers_r))
+		add_body_image(composite, image_fingers_right, (832, 352), True, get_color(body.fingers_r))
 
 	if body.fingers_l.is_alive():
-		await add_body_image(composite, image_fingers_left, (192, 352), True, await get_color(body.fingers_l))
+		add_body_image(composite, image_fingers_left, (192, 352), True, get_color(body.fingers_l))
 
 	if body.ass_cheek_r.is_alive():
-		await add_body_image(composite, image_ass_cheek, (576, 536), True, await get_color(body.ass_cheek_r))
+		add_body_image(composite, image_ass_cheek, (576, 536), True, get_color(body.ass_cheek_r))
 
 	if body.ass_cheek_l.is_alive():
-		await add_body_image(composite, image_ass_cheek, (448, 536), True, await get_color(body.ass_cheek_l))
+		add_body_image(composite, image_ass_cheek, (448, 536), True, get_color(body.ass_cheek_l))
 
 	if body.leg_r.is_alive():
-		await add_body_image(composite, image_leg_right, (616, 624), True, await get_color(body.leg_r))
+		add_body_image(composite, image_leg_right, (616, 624), True, get_color(body.leg_r))
 
 	if body.leg_l.is_alive():
-		await add_body_image(composite, image_leg_left, (408, 624), True, await get_color(body.leg_l))
+		add_body_image(composite, image_leg_left, (408, 624), True, get_color(body.leg_l))
 
 	if body.foot_r.is_alive():
-		await add_body_image(composite, image_hand, (656, 736), True, await get_color(body.foot_r))
+		add_body_image(composite, image_hand, (656, 736), True, get_color(body.foot_r))
 
 	if body.foot_l.is_alive():
-		await add_body_image(composite, image_hand, (368, 736), True, await get_color(body.foot_l))
+		add_body_image(composite, image_hand, (368, 736), True, get_color(body.foot_l))
 
 	if body.toes_r.is_alive():
-		await add_body_image(composite, image_toes_right, (672, 768), True, await get_color(body.toes_r))
+		add_body_image(composite, image_toes_right, (672, 768), True, get_color(body.toes_r))
 
 	if body.toes_l.is_alive():
-		await add_body_image(composite, image_toes_left, (352, 768), True, await get_color(body.toes_l))
+		add_body_image(composite, image_toes_left, (352, 768), True, get_color(body.toes_l))
 
 	if body.penis.is_alive():
-		await add_body_image(composite, image_penis, (512, 640), True, await get_color(body.penis))
+		add_body_image(composite, image_penis, (512, 640), True, get_color(body.penis))
 
 	if body.testicles.is_alive():
-		await add_body_image(composite, image_testicles, (512, 608), True, await get_color(body.testicles))
+		add_body_image(composite, image_testicles, (512, 608), True, get_color(body.testicles))
 
 	if body.torso.is_alive():
-		await add_body_image(composite, image_torso, (512, 448), True, await get_color(body.torso))
+		add_body_image(composite, image_torso, (512, 448), True, get_color(body.torso))
 
-	await add_body_image(composite, image_healthbar, (512, 896), False)
+	add_body_image(composite, image_healthbar, (512, 896), False)
 
 	return composite
 
-async def add_body_image(image_background, image_addition, position, replace=False, color=getrgb("white")):
+def add_body_image(image_background, image_addition, position, replace=False, color=getrgb("white")):
 	image_offset = (round(image_addition.width/2), round(image_addition.height/2))
 	new_image_data = []
 	if replace:
@@ -399,7 +398,7 @@ async def add_body_image(image_background, image_addition, position, replace=Fal
 		image_addition.putdata(new_image_data)
 	image_background.alpha_composite(image_addition, tuple(map(sub, position, image_offset)))
 
-async def weight_colors(color_1, color_2, weight_towards_color_1):
+def weight_colors(color_1, color_2, weight_towards_color_1):
 
 	w_1 = weight_towards_color_1
 	w_2 = 1 - weight_towards_color_1
@@ -409,12 +408,12 @@ async def weight_colors(color_1, color_2, weight_towards_color_1):
 
 	return (round(x_1*w_1 + z_1*w_2), round(x_2*w_1 + z_2*w_2), round(x_3*w_1 + z_3*w_2))
 
-async def get_color(body_part):
+def get_color(body_part):
 
-	color = await weight_colors(getrgb("red"), getrgb("white"), 1 - body_part.health / body_part.max_health)
+	color = weight_colors(getrgb("red"), getrgb("white"), 1 - body_part.health / body_part.max_health)
 	return color
 
-async def add_head_stan_image(image_background, position, body):
+def add_head_stan_image(image_background, position, body):
 
 	head = body.head
 	image = Image.open("images/stanface.png").convert("RGBA")

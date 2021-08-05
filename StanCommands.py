@@ -47,13 +47,13 @@ async def cmd_attempt_combat(message, messages_instigate, messages_delete, flags
 		messages_delete.append(message)
 		return
 
-	current_attackers = []
-	for i in messages_instigate:
-		current_attackers.append(i.author)
+	# current_attackers = []
+	# for i in messages_instigate:
+	# 	current_attackers.append(i.author)
 
-	if message.author in current_attackers:
-		messages_delete.append(message)
-		return
+	# if message.author in current_attackers:
+	# 	messages_delete.append(message)
+	# 	return
 
 	await message.channel.trigger_typing()
 	messages_instigate.append(message)

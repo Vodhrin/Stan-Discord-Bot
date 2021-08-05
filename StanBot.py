@@ -88,7 +88,7 @@ async def on_message(message):
 			return
 
 		for i in admin_ids:
-			if str(message.author.id) == i:
+			if str(message.author.id) == i.strip():
 				for i in admin_commands:
 					if i.startswith(message.content.split()[1]):
 						command = i.split(":")[1]
@@ -220,6 +220,7 @@ async def periodic_text_action():
 			new_message = await channel.send(story)
 			messages_to_delete.append(new_message)
 			return
+
 
 @tasks.loop(seconds = 60)
 async def periodic_voice_action():
