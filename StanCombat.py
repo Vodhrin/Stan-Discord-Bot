@@ -257,9 +257,6 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 	#if stan's health is now below 500 he overall dies
 	overall_health = body.get_current_total_health()
-
-	print(overall_health)
-
 	if overall_health < 500:
 		bodies.remove(body)
 		body.die()
