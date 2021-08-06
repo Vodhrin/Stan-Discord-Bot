@@ -114,6 +114,16 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			del text[0:3]
 			text = " ".join(text)
 
+			#every attack with a weapon adds 1 to the bodies' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
+			#also returns the memory number before the update ocurred (current memory - 1)
+			weapon_memory_mult = 1
+			#only updates weapon memory if a weapon was used
+			if len(i.content.split()) > 3:
+				mem_num = body.update_weapon_memory(text)
+
+				num = 1 - (mem_num * 0.10)
+				weapon_memory_mult = max([0.10, num])
+
 			if len(i.content.split()) > 3:
 				weapon, mult = get_weapon_info(text)
 
@@ -121,7 +131,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			damage = round(random.randrange(0, 50) * mult)
 			if weapon != "":	
 				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
-				damage = round((num / 2) * mult)
+				damage = round((num / 2) * mult * weapon_memory_mult)
 
 			body_part = viable_body_parts[index]
 			del viable_body_parts[index]
@@ -137,6 +147,16 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			del text[0:3]
 			text = " ".join(text)
 
+			#every attack with a weapon adds 1 to the bodies' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
+			#also returns the memory number before the update ocurred (current memory - 1)
+			weapon_memory_mult = 1
+			#only updates weapon memory if a weapon was used
+			if len(i.content.split()) > 3:
+				mem_num = body.update_weapon_memory(text)
+
+				num = 1 - (mem_num * 0.10)
+				weapon_memory_mult = max([0.10, num])
+
 			if len(i.content.split()) > 3:
 				weapon, mult = get_weapon_info(text)
 
@@ -144,7 +164,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			damage = round(random.randrange(0, 50) * mult)
 			if weapon != "":	
 				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
-				damage = round((num / 2) * mult)
+				damage = round((num / 2) * mult * weapon_memory_mult)
 
 			bopy_part = viable_body_parts[index]
 
@@ -181,8 +201,8 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 	messages.append(new_message)
 	os.remove(filename)
 
+	#initial attack acknowledgement for every attack
 	for i in attacks:
-		#initial attack acknowledgement
 		maybe_total = ""
 		parts = [i.body_part]
 		parts.extend(i.additional_body_parts)
@@ -200,6 +220,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			else:
 				overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with a " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 
+	#finds all body parts that were damaged and or killed
 	body_parts_affected = []
 	for i in attacks:
 		if i.body_part not in body_parts_affected:
@@ -208,6 +229,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			if o not in body_parts_affected:
 				body_parts_affected.append(o)
 
+	#says the health left for each body part that was damaged and is not dead
 	for i in body_parts_affected:
 		if i.state != Body_Part.states["Dead"]:
 			overall_message += "_Stan's " + i.name + " now has " + str(i.health) + " health left!_" + "\n"
@@ -540,6 +562,8 @@ class Combat_Body:
 
 		self.max_health = self.get_current_total_health()
 
+		self.weapon_memory_table = {}
+
 		self.damage_table = {}
 
 		self.log = ""
@@ -603,6 +627,13 @@ class Combat_Body:
 		for i in self.body_parts:
 			number += i.health
 		return number
+
+	def update_weapon_memory(self, weapon):
+		if weapon not in self.weapon_memory_table.keys():
+			self.weapon_memory_table[weapon] = 1
+		else:
+			self.weapon_memory_table[weapon] += 1
+		return self.weapon_memory_table[weapon] - 1
 
 	def update_damage_table(self, combatant_name, damage):
 		if combatant_name not in self.damage_table.keys():

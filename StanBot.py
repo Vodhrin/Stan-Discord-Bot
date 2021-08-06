@@ -231,7 +231,7 @@ async def periodic_voice_action():
 		for channel in guild.voice_channels:
 			if len(channel.members) > 0:
 
-				#random voice file
+				#cum zone sounds
 				if random.randrange(0, 76) == 1:
 					await channel.connect()
 					filenames = get_cum_filenames()
@@ -246,6 +246,7 @@ async def periodic_voice_action():
 			 				await voice_client.disconnect()
 			 				return
 
+			 	#fart sound
 				if random.randrange(0, 46) == 1:
 			 		await channel.connect()
 			 		audio = discord.FFmpegPCMAudio("audio/fart.mp3")
@@ -257,6 +258,7 @@ async def periodic_voice_action():
 			 				await voice_client.disconnect()
 			 				return
 
+			 	#stan scream sound
 				if random.randrange(0, 46) == 1:
 			 		await channel.connect()
 			 		audio = discord.FFmpegPCMAudio("audio/cody_scream.mp3", options="-ss " + str(random.uniform(0, 4)))
@@ -270,7 +272,7 @@ async def periodic_voice_action():
 
 def get_cum_filenames():
 
-	return os.listdir("audio/cum_lines")
+	return os.listdir("audio/cum_lines") 
 
 combat_tick.start()
 periodic_voice_action.start()
