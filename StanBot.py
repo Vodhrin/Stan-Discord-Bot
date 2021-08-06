@@ -221,7 +221,6 @@ async def periodic_text_action():
 			messages_to_delete.append(new_message)
 			return
 
-
 @tasks.loop(seconds = 60)
 async def periodic_voice_action():
 

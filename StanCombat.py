@@ -12,6 +12,10 @@ from PIL.ImageColor import getrgb
 
 from StanLanguage import *
 
+def combat_init(passed_client):
+	global client
+	client = passed_client
+
 async def combat_query(message_group, messages, bodies, flags, channel):
 
 	#add the initiating user's command message to list of messages to delete
@@ -122,7 +126,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			body_part = viable_body_parts[index]
 			del viable_body_parts[index]
 
-			attack = Attack(i.author, damage, body_part, weapon)
+			attack = Attack(i.author, damage, body, body_part, weapon)
 			attacks.append(attack)
 	else:
 		for i in messages_attackers:
@@ -144,7 +148,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 			bopy_part = viable_body_parts[index]
 
-			attack = Attack(i.author, damage, body_part, weapon)
+			attack = Attack(i.author, damage, body, body_part, weapon)
 			attacks.append(attack)
 
 	#determine if each attack hits other parts around it (total damage stays the same, just split among the parts)
@@ -267,6 +271,16 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 		new_message = await channel.send(overall_message)
 		messages.append(new_message)
 		await asyncio.sleep(10)
+		await combat_clear_messages(channel, messages_attackers, messages)
+		overall_message = ""
+		sorted_damage_table = sorted(body.damage_table.items(), key=lambda kv:kv[1], reverse=True)
+		if len(sorted_damage_table) > 0:
+			for idx, i in enumerate(sorted_damage_table):
+				overall_message += str(idx + 1) + ". " + sorted_damage_table[idx][0] + " --- " + str(sorted_damage_table[idx][1]) + " total damage" + "\n"
+		overall_message += "**I can cum again in 20 seconds**"
+		new_message = await channel.send(overall_message)
+		messages.append(new_message)
+		await asyncio.sleep(20)
 		await combat_clear_messages(channel, messages_attackers, messages)
 		return
 	
@@ -513,6 +527,8 @@ class Combat_Body:
 
 		self.max_health = self.get_current_total_health()
 
+		self.damage_table = {}
+
 	def get(self, attrname):
 		return getattr(self, attrname)
 
@@ -573,6 +589,12 @@ class Combat_Body:
 			number += i.health
 		return number
 
+	def update_damage_table(self, combatant_name, damage):
+		if combatant_name not in self.damage_table.keys():
+			self.damage_table[combatant_name] = damage
+		else:
+			self.damage_table[combatant_name] += damage
+
 	def die(self):
 		for i in self.body_parts:
 			del i
@@ -620,9 +642,10 @@ class Body_Part:
 		return dead_parts
 
 class Attack:
-	def __init__(self, attacker, damage, body_part, weapon=""):
+	def __init__(self, attacker, damage, body, body_part, weapon=""):
 		self.attacker = attacker
 		self.damage = damage
+		self.body = body
 		self.body_part = body_part
 		self.additional_body_parts = []
 		self.weapon = weapon
@@ -633,6 +656,8 @@ class Attack:
 		num = 1 + len(self.additional_body_parts)
 
 		split_damage = math.floor(self.damage / num)
+
+		self.body.update_damage_table(self.attacker.name, split_damage * num)
 
 		body_parts_to_resolve = [self.body_part]
 		body_parts_to_resolve.extend(self.additional_body_parts)
