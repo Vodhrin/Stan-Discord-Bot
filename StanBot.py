@@ -231,6 +231,7 @@ async def periodic_voice_action():
 		for channel in guild.voice_channels:
 			if len(channel.members) > 0:
 
+				#random voice file
 				if random.randrange(0, 76) == 1:
 					await channel.connect()
 					filenames = get_cum_filenames()

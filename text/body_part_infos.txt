@@ -21,6 +21,7 @@ leg_r:right leg,100
 leg_l:left leg,100
 ass_cheek_r:right ass cheek,35
 ass_cheek_l:left ass cheek,35
+anus:anus,25
 pubic_hair:pubic hair,15
 penis:penis,15
 testicles:testicles,15

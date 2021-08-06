@@ -267,7 +267,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 		await combat_clear_messages(channel, messages_attackers, messages)
 		overall_message = ""
 		overall_message += replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!_") + "\n"
-		overall_message += replace_text_tags("**I will return, you <a> <ns> <adds>.**") + "\n"
+		overall_message += replace_text_tags("**I will return, you <a> <ns> <addp>.**") + "\n"
 		new_message = await channel.send(overall_message)
 		messages.append(new_message)
 		await asyncio.sleep(10)
@@ -282,9 +282,21 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 		messages.append(new_message)
 		await asyncio.sleep(20)
 		await combat_clear_messages(channel, messages_attackers, messages)
+
+		#send text log of the fight
+		filename = "cache/" + hashlib.md5(channel.name.encode()).hexdigest() + ".txt"
+		log = body.log
+		log = log.replace("_", "")
+		log = log.replace("**", "")
+		file = open(filename, "w")
+		file.write(log)
+		file.close()
+		await channel.send(file=discord.File(filename, channel.name + " combat log.txt"))
+		os.remove(filename)
 		return
 	
 	new_message = await channel.send(overall_message)
+	body.log += overall_message + "\n"
 	messages.append(new_message)
 
 async def combat_clear_messages(channel, message_group, messages):
@@ -516,6 +528,7 @@ class Combat_Body:
 		self.leg_l = None
 		self.ass_cheek_r = None
 		self.ass_cheek_l = None
+		self.anus = None
 		self.pubic_hair = None
 		self.penis = None
 		self.testicles = None
@@ -528,6 +541,8 @@ class Combat_Body:
 		self.max_health = self.get_current_total_health()
 
 		self.damage_table = {}
+
+		self.log = ""
 
 	def get(self, attrname):
 		return getattr(self, attrname)
@@ -542,7 +557,7 @@ class Combat_Body:
 		relations = open("text/body_part_relations.txt", "r").readlines()
 
 		#instantiate all of the parts with only names and health first
-		for i in list(vars(self).keys())[1:28]:
+		for i in list(vars(self).keys())[1:29]:
 
 			info = None
 
@@ -556,7 +571,7 @@ class Combat_Body:
 			self.set(i, Body_Part(name, health))
 			self.body_parts.append(self.get(i))
 
-		for i in list(vars(self).keys())[1:28]:
+		for i in list(vars(self).keys())[1:29]:
 
 			dependents = None
 			relateds = None
