@@ -2,6 +2,7 @@ import discord
 import random
 import time
 import asyncio
+from PIL import Image, ImageFilter, ImageFont, ImageDraw
 
 from StanCombat import *
 from StanLanguage import *

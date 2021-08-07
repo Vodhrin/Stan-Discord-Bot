@@ -26,13 +26,14 @@ intents.messages = True
 client = discord.Client(intents = intents)
 
 messages_to_delete = []
-combat_bodies = []
+combat_stans = []
 combat_messages_instigate = []
 combat_processing_flags = {}
 combat_messages_delete = []
 
 lanuage_init()
 commands_init(client)
+combat_init(client)
 
 @client.event
 async def on_ready():
@@ -176,7 +177,7 @@ async def combat_tick():
 			for o in message_group:
 				combat_messages_instigate.remove(o)
 
-			await combat_query(message_group, combat_messages_delete, combat_bodies, combat_processing_flags, i)
+			await combat_query(message_group, combat_messages_delete, combat_stans, combat_processing_flags, i)
 
 @tasks.loop(seconds = 60)
 async def periodic_text_action():
@@ -234,7 +235,7 @@ async def periodic_voice_action():
 				#cum zone sounds
 				if random.randrange(0, 76) == 1:
 					await channel.connect()
-					filenames = get_cum_filenames()
+					filenames = os.listdir("audio/cum_lines") 
 					filename = filenames[random.randrange(len(filenames))]
 					audio = discord.FFmpegPCMAudio("audio/cum_lines/" + filename)
 					audio_length_in_seconds = int(MP3("audio/cum_lines/" + filename).info.length)
@@ -269,10 +270,6 @@ async def periodic_voice_action():
 			 				voice_client.stop()
 			 				await voice_client.disconnect()
 			 				return
-
-def get_cum_filenames():
-
-	return os.listdir("audio/cum_lines") 
 
 combat_tick.start()
 periodic_voice_action.start()

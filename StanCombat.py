@@ -6,6 +6,7 @@ import hashlib
 import os
 import numpy
 import math
+import pickle
 from operator import sub
 from PIL import Image, ImageFilter, ImageFont, ImageDraw
 from PIL.ImageColor import getrgb
@@ -14,16 +15,18 @@ from StanLanguage import *
 
 def combat_init(passed_client):
 	global client
+	global combatants
 	client = passed_client
+	combatants = load_combatants_data()
 
-async def combat_query(message_group, messages, bodies, flags, channel):
+async def combat_query(message_group, messages, stans, flags, channel):
 
 	#add the initiating user's command message to list of messages to delete
 	messages.extend(message_group)
 
 	#determining if we need to start a new fight or if one is already occuring
 	already_fighting = False
-	for i in bodies:
+	for i in stans:
 		if i.channel is channel:
 			already_fighting = True
 
@@ -38,11 +41,11 @@ async def combat_query(message_group, messages, bodies, flags, channel):
 			else:
 				flags[channel] = True
 				await combat_clear_messages(channel, message_group, messages)
-				await combat_start(channel, messages, bodies)
+				await combat_start(channel, messages, stans)
 				flags[channel] = False
 
 	#attacking
-	body = None
+	stan = None
 
 	messages_attackers = []
 	for i in message_group:
@@ -52,9 +55,9 @@ async def combat_query(message_group, messages, bodies, flags, channel):
 
 	if len(messages_attackers) > 0:
 		in_fight = False
-		for i in bodies:
+		for i in stans:
 			if i.channel is channel:
-				body = i
+				stan = i
 				in_fight = True
 
 		#tell user to start a fight first
@@ -77,20 +80,20 @@ async def combat_query(message_group, messages, bodies, flags, channel):
 			await combat_clear_messages(channel, message_group, messages)
 
 			#run all the actual code to do with fight calculations, combat image, etc
-			await combat_update(messages_attackers, channel, messages, bodies, body)
+			await combat_update(messages_attackers, channel, messages, stans, stan)
 			flags[channel] = False
 			return
 
-async def combat_start(channel, messages, bodies):
+async def combat_start(channel, messages, stans):
 
-	#instantiates a new combat body class and adds it to the list of current combat bodies
-	body = Combat_Body(channel)
-	bodies.append(body)
+	#instantiates a new combat body class and adds it to the list of current combat stans
+	stan = Stan(channel)
+	stans.append(stan)
 	new_message = await channel.send("Lets go, nigger.")
 	messages.append(new_message)
 	return
 
-async def combat_update(messages_attackers, channel, messages, bodies,  body):
+async def combat_update(messages_attackers, channel, messages, stans,  stan):
 
 	overall_message = ""
 	attackers = []
@@ -99,12 +102,13 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 	#make a list of only currently living bodyparts
 	viable_body_parts = []
-	for i in body.body_parts:
+	for i in stan.body.body_parts:
 		if i.state != Body_Part.states["Dead"]:
 			viable_body_parts.append(i)
 
 	#generate a list of attacks, one for each attacker
 	attacks = []
+	#if there enough body parts for each attacker to attack a separate one, force them to
 	if len(viable_body_parts) > len(attackers):
 		for i in messages_attackers:
 			mult = 1
@@ -114,12 +118,12 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			del text[0:3]
 			text = " ".join(text)
 
-			#every attack with a weapon adds 1 to the bodies' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
+			#every attack with a weapon adds 1 to the stans' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
 			#also returns the memory number before the update ocurred (current memory - 1)
 			weapon_memory_mult = 1
 			#only updates weapon memory if a weapon was used
 			if len(i.content.split()) > 3:
-				mem_num = body.update_weapon_memory(text)
+				mem_num = stan.update_weapon_memory(text)
 
 				num = 1 - (mem_num * 0.10)
 				weapon_memory_mult = max([0.10, num])
@@ -136,8 +140,9 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			body_part = viable_body_parts[index]
 			del viable_body_parts[index]
 
-			attack = Attack(i.author, damage, body, body_part, weapon)
+			attack = Combatant_Attack(i.author, damage, stan, body_part, weapon)
 			attacks.append(attack)
+	#if there is not enough body parts for each attacker to attack a seperate one, allow them to attack the same one
 	else:
 		for i in messages_attackers:
 			mult = 1
@@ -147,12 +152,12 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			del text[0:3]
 			text = " ".join(text)
 
-			#every attack with a weapon adds 1 to the bodies' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
+			#every attack with a weapon adds 1 to the stans' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
 			#also returns the memory number before the update ocurred (current memory - 1)
 			weapon_memory_mult = 1
 			#only updates weapon memory if a weapon was used
 			if len(i.content.split()) > 3:
-				mem_num = body.update_weapon_memory(text)
+				mem_num = stan.update_weapon_memory(text)
 
 				num = 1 - (mem_num * 0.10)
 				weapon_memory_mult = max([0.10, num])
@@ -168,7 +173,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 			bopy_part = viable_body_parts[index]
 
-			attack = Attack(i.author, damage, body, body_part, weapon)
+			attack = Combatant_Attack(i.author, damage, stan, body_part, weapon)
 			attacks.append(attack)
 
 	#determine if each attack hits other parts around it (total damage stays the same, just split among the parts)
@@ -195,7 +200,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 	#print combat image
 	filename = "cache/" + hashlib.md5(messages_attackers[0].jump_url.encode()).hexdigest() + ".png"
-	image = create_combat_image(body)
+	image = await create_combat_image(stan.body)
 	image.save(filename)
 	new_message = await channel.send(file=discord.File(filename, "rapedbystan.png"))
 	messages.append(new_message)
@@ -282,10 +287,10 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 			overall_message += replace_text_tags("**Oh god, my " + significant_part.name + "! It looks like a <vpa> <a> <ns> now!**") + "\n"
 
 	#if stan's health is now below 500 he overall dies
-	overall_health = body.get_current_total_health()
+	overall_health = stan.body.get_current_total_health()
 	if overall_health < 500:
-		bodies.remove(body)
-		body.die()
+		stans.remove(stan)
+		stan.die()
 		await combat_clear_messages(channel, messages_attackers, messages)
 		overall_message = ""
 		overall_message += replace_text_tags("_Stan has been vanquished! His <vpa> body now resembles a pile of <a> <np>!_") + "\n"
@@ -295,7 +300,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 		await asyncio.sleep(10)
 		await combat_clear_messages(channel, messages_attackers, messages)
 		overall_message = ""
-		sorted_damage_table = sorted(body.damage_table.items(), key=lambda kv:kv[1], reverse=True)
+		sorted_damage_table = sorted(stan.damage_table.items(), key=lambda kv:kv[1], reverse=True)
 		if len(sorted_damage_table) > 0:
 			for idx, i in enumerate(sorted_damage_table):
 				overall_message += str(idx + 1) + ". " + sorted_damage_table[idx][0] + " --- " + str(sorted_damage_table[idx][1]) + " total damage" + "\n"
@@ -307,7 +312,7 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 
 		#send text log of the fight
 		filename = "cache/" + hashlib.md5(channel.name.encode()).hexdigest() + ".txt"
-		log = body.log
+		log = stan.log
 		log = log.replace("_", "")
 		log = log.replace("**", "")
 		file = open(filename, "w")
@@ -318,8 +323,9 @@ async def combat_update(messages_attackers, channel, messages, bodies,  body):
 		return
 	
 	new_message = await channel.send(overall_message)
-	body.log += overall_message + "\n"
+	stan.log += overall_message + "\n"
 	messages.append(new_message)
+	save_combatants_data(combatants)
 
 async def combat_clear_messages(channel, message_group, messages):
 
@@ -338,23 +344,11 @@ async def combat_clear_messages(channel, message_group, messages):
 				pass
 	messages.extend(message_group)
 
-def create_combat_image(body):
+async def create_combat_image(body):
 
 	image_background = Image.open("images/background.png").convert("RGBA")
-	image_head = Image.open("images/stanface.png").convert("RGBA")
-	image_ear = Image.open("images/body_parts/ear.png").convert("RGBA")
-	image_torso = Image.open("images/body_parts/torso.png").convert("RGBA")
-	image_arm = Image.open("images/body_parts/arm.png").convert("RGBA")
-	image_hand = Image.open("images/body_parts/hand.png").convert("RGBA")
-	image_fingers_right = Image.open("images/body_parts/fingers_right.png").convert("RGBA")
-	image_fingers_left = Image.open("images/body_parts/fingers_left.png").convert("RGBA")
-	image_leg_right = Image.open("images/body_parts/leg_right.png").convert("RGBA")
-	image_leg_left = Image.open("images/body_parts/leg_left.png").convert("RGBA")
-	image_toes_right = Image.open("images/body_parts/toes_right.png").convert("RGBA")
-	image_toes_left = Image.open("images/body_parts/toes_left.png").convert("RGBA")
-	image_ass_cheek = Image.open("images/body_parts/ass_cheek.png").convert("RGBA")
-	image_penis = Image.open("images/body_parts/penis.png").convert("RGBA")
-	image_testicles = Image.open("images/body_parts/testicles.png").convert("RGBA")
+
+	body_part_data = open("text/body_part_image_data.txt", "r").readlines()
 
 	file_name = ""
 	if body.get_current_total_health() > 500:
@@ -367,80 +361,50 @@ def create_combat_image(body):
 
 	composite = image_background
 
-	if body.head.is_alive():
-		add_head_stan_image(composite, (512, 192), body)
+	for i in os.listdir("images/body_parts"):
 
-	if body.ear_r.is_alive():
-		add_body_image(composite, image_ear, (640, 192), True, get_color(body.ear_r))
+		i_stripped = i.replace(".png", "")
+		for o in body_part_data:
+			if o.startswith(i_stripped):
+				body_part = body.get(i_stripped)
+				file_name = "images/body_parts/" + i
+				image = Image.open(file_name).convert("RGBA")
+				x,y = o.strip().split(":")[1].split(",")
 
-	if body.ear_l.is_alive():
-		add_body_image(composite, image_ear, (384, 192), True, get_color(body.ear_l))
+				if body_part.is_alive():
+					add_body_image(composite, image, (int(x), int(y)), get_color(body_part))
 
-	if body.arm_r.is_alive():
-		add_body_image(composite, image_arm, (672, 352), True, get_color(body.arm_r))
+	if body.uid == 0:
+		if body.head.is_alive():
+			add_head_image(composite, "images/stanface.png", body)
+	else:
+		user = await client.fetch_user(body.uid)
+		file_name = "cache/" + hashlib.md5(str(body.uid).encode()).hexdigest() + ".png"
+		await user.avatar_url_as(format="png").save(file_name)
 
-	if body.arm_l.is_alive():
-		add_body_image(composite, image_arm, (352, 352), True, get_color(body.arm_l))
+		image = Image.open(file_name).convert("RGBA")
+		image_mask = Image.open("images/head_mask.png").convert("RGBA")
+		image_empty = Image.open("images/empty_image.png").convert("RGBA")
 
-	if body.hand_r.is_alive():
-		add_body_image(composite, image_hand, (800, 352), True, get_color(body.hand_r))
+		cropped = Image.composite(image, image_empty, image_mask)
+		cropped.save(file_name)
+		add_head_image(composite, file_name, body)
+		os.remove(file_name)
 
-	if body.hand_l.is_alive():
-		add_body_image(composite, image_hand, (224, 352), True, get_color(body.hand_l))
-
-	if body.fingers_r.is_alive():
-		add_body_image(composite, image_fingers_right, (832, 352), True, get_color(body.fingers_r))
-
-	if body.fingers_l.is_alive():
-		add_body_image(composite, image_fingers_left, (192, 352), True, get_color(body.fingers_l))
-
-	if body.ass_cheek_r.is_alive():
-		add_body_image(composite, image_ass_cheek, (576, 536), True, get_color(body.ass_cheek_r))
-
-	if body.ass_cheek_l.is_alive():
-		add_body_image(composite, image_ass_cheek, (448, 536), True, get_color(body.ass_cheek_l))
-
-	if body.leg_r.is_alive():
-		add_body_image(composite, image_leg_right, (616, 624), True, get_color(body.leg_r))
-
-	if body.leg_l.is_alive():
-		add_body_image(composite, image_leg_left, (408, 624), True, get_color(body.leg_l))
-
-	if body.foot_r.is_alive():
-		add_body_image(composite, image_hand, (656, 736), True, get_color(body.foot_r))
-
-	if body.foot_l.is_alive():
-		add_body_image(composite, image_hand, (368, 736), True, get_color(body.foot_l))
-
-	if body.toes_r.is_alive():
-		add_body_image(composite, image_toes_right, (672, 768), True, get_color(body.toes_r))
-
-	if body.toes_l.is_alive():
-		add_body_image(composite, image_toes_left, (352, 768), True, get_color(body.toes_l))
-
-	if body.penis.is_alive():
-		add_body_image(composite, image_penis, (512, 640), True, get_color(body.penis))
-
-	if body.testicles.is_alive():
-		add_body_image(composite, image_testicles, (512, 608), True, get_color(body.testicles))
-
-	if body.torso.is_alive():
-		add_body_image(composite, image_torso, (512, 448), True, get_color(body.torso))
 
 	add_body_image(composite, image_healthbar, (512, 896), False)
 
 	return composite
 
-def add_body_image(image_background, image_addition, position, replace=False, color=getrgb("white")):
+def add_body_image(image_background, image_addition, position, color=getrgb("white")):
 	image_offset = (round(image_addition.width/2), round(image_addition.height/2))
 	new_image_data = []
-	if replace:
-		for i in image_addition.getdata():
-			if i[3] > 0:
-				new_image_data.append(color)
-			else:
-				new_image_data.append(i)
-		image_addition.putdata(new_image_data)
+	for i in image_addition.getdata():
+		if i[3] > 0:
+			new_image_data.append(color)
+		else:
+			new_image_data.append(i)
+	image_addition.putdata(new_image_data)
 	image_background.alpha_composite(image_addition, tuple(map(sub, position, image_offset)))
 
 def weight_colors(color_1, color_2, weight_towards_color_1):
@@ -458,16 +422,16 @@ def get_color(body_part):
 	color = weight_colors(getrgb("red"), getrgb("white"), 1 - body_part.health / body_part.max_health)
 	return color
 
-def add_head_stan_image(image_background, position, body):
+def add_head_image(image_background, file_name, body):
 
+	position = (512, 192)
 	head = body.head
-	image = Image.open("images/stanface.png").convert("RGBA")
+	image = Image.open(file_name).convert("RGBA")
 	image_offset = (round(image.width/2), round(image.height/2))
 
 	weight = head.health / head.max_health
 
 	new_image_data = []
-
 
 	for i in image.getdata():
 			if i[3] > 0:
@@ -523,10 +487,56 @@ def get_weapon_info(name):
 
 	return (full_name, mult)
 
-class Combat_Body:
+def save_combatants_data(combatants):
+	for i in combatants:
+		with open("combat_data/" + str(i.uid) + ".pkl", "wb") as output_file:
+			pickle.dump(i, output_file, pickle.HIGHEST_PROTOCOL)
+
+def load_combatants_data():
+	combatants = []
+	for i in os.listdir("combat_data/"):
+		with open("combat_data/" + i) as input_file:
+			combatant = pickle.load(input_file)
+			combatants.append(combatant)
+	return combatants
+
+class Stan:
 	def __init__(self, channel):
 		self.channel = channel
+		self.body = Body()
+		self.weapon_memory_table = {}
+		self.damage_table = {}
+		self.log = ""
 
+	def update_weapon_memory(self, weapon):
+		if weapon not in self.weapon_memory_table.keys():
+			self.weapon_memory_table[weapon] = 1
+		else:
+			self.weapon_memory_table[weapon] += 1
+		return self.weapon_memory_table[weapon] - 1
+
+	def update_damage_table(self, combatant_name, damage):
+		if combatant_name not in self.damage_table.keys():
+			self.damage_table[combatant_name] = damage
+		else:
+			self.damage_table[combatant_name] += damage
+
+	def die(self):
+		self.body.die()
+		del self
+
+class Combatant:
+
+	def __init__(self, uid):
+		self.body = Body(uid)
+		self.uid = uid
+
+	async def get_user(self):
+		user = await client.fetch_user(self.uid)
+		return user
+
+class Body:
+	def __init__(self, uid=0):
 		self.eye_r = None
 		self.eye_l = None
 		self.ear_r = None
@@ -562,11 +572,7 @@ class Combat_Body:
 
 		self.max_health = self.get_current_total_health()
 
-		self.weapon_memory_table = {}
-
-		self.damage_table = {}
-
-		self.log = ""
+		self.uid = uid
 
 	def get(self, attrname):
 		return getattr(self, attrname)
@@ -581,7 +587,7 @@ class Combat_Body:
 		relations = open("text/body_part_relations.txt", "r").readlines()
 
 		#instantiate all of the parts with only names and health first
-		for i in list(vars(self).keys())[1:29]:
+		for i in list(vars(self).keys())[0:28]:
 
 			info = None
 
@@ -595,7 +601,7 @@ class Combat_Body:
 			self.set(i, Body_Part(name, health))
 			self.body_parts.append(self.get(i))
 
-		for i in list(vars(self).keys())[1:29]:
+		for i in list(vars(self).keys())[0:28]:
 
 			dependents = None
 			relateds = None
@@ -627,19 +633,6 @@ class Combat_Body:
 		for i in self.body_parts:
 			number += i.health
 		return number
-
-	def update_weapon_memory(self, weapon):
-		if weapon not in self.weapon_memory_table.keys():
-			self.weapon_memory_table[weapon] = 1
-		else:
-			self.weapon_memory_table[weapon] += 1
-		return self.weapon_memory_table[weapon] - 1
-
-	def update_damage_table(self, combatant_name, damage):
-		if combatant_name not in self.damage_table.keys():
-			self.damage_table[combatant_name] = damage
-		else:
-			self.damage_table[combatant_name] += damage
 
 	def die(self):
 		for i in self.body_parts:
@@ -687,11 +680,11 @@ class Body_Part:
 			dead_parts.append(i)
 		return dead_parts
 
-class Attack:
-	def __init__(self, attacker, damage, body, body_part, weapon=""):
+class Combatant_Attack:
+	def __init__(self, attacker, damage, stan, body_part, weapon=""):
 		self.attacker = attacker
 		self.damage = damage
-		self.body = body
+		self.stan = stan
 		self.body_part = body_part
 		self.additional_body_parts = []
 		self.weapon = weapon
@@ -703,7 +696,7 @@ class Attack:
 
 		split_damage = math.floor(self.damage / num)
 
-		self.body.update_damage_table(self.attacker.name, split_damage * num)
+		self.stan.update_damage_table(self.attacker.name, split_damage * num)
 
 		body_parts_to_resolve = [self.body_part]
 		body_parts_to_resolve.extend(self.additional_body_parts)
@@ -715,3 +708,7 @@ class Attack:
 
 	def update_parts_killed(self, parts):
 		self.parts_killed = parts
+
+class Stan_Attack:
+
+	pass
