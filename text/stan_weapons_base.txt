@@ -1,0 +1,15 @@
+hammer
+sword
+spear
+launcher
+beam
+creamer
+crusher
+mace
+rammer
+slicer
+scissors
+slinger
+laser
+scraper
+cleaver

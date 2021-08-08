@@ -59,6 +59,10 @@ async def on_message(message):
 	if message.author == client.user:
 		return
 
+	#ignore past this point if channel is a dm
+	if isinstance(message.channel, discord.DMChannel):
+		return
+
 	#ignore channels with no permissions
 	if not message.channel.permissions_for(message.channel.guild.me).send_messages:
 		return

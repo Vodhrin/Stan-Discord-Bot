@@ -96,9 +96,27 @@ async def combat_start(channel, messages, stans):
 async def combat_update(messages_attackers, channel, messages, stans,  stan):
 
 	overall_message = ""
-	attackers = []
+	combatants_present = []
 	for i in messages_attackers:
-		attackers.append(i.author)
+		add_flag = True
+		#check if this combatant is already in the list of combatants for this update tick
+		for o in combatants_present:
+			if o.uid == i.author.id:
+				add_flag = False
+		#if the combatant isnt in the list of combatants for this update tick yet, add it
+		if add_flag:
+			added = False
+			#try to add the combatant from the global list of combatants that was loaded from disk at start
+			for o in combatants:
+				if o.uid == i.author.id:
+					combatants_present.append(o)
+					added = True
+			#if the combatant was not present in the global list(they have not played before), create a new instance for them and add it to the global list and the list for this update tick
+			#it will also be saved to disk at the end of this update tick and be persistent forever(unless i delete the files manually)
+			if not added:
+				new_combatant = Combatant(i.author.id)
+				combatants_present.append(new_combatant)
+				combatants.append(new_combatant)
 
 	#make a list of only currently living bodyparts
 	viable_body_parts = []
@@ -108,73 +126,27 @@ async def combat_update(messages_attackers, channel, messages, stans,  stan):
 
 	#generate a list of attacks, one for each attacker
 	attacks = []
-	#if there enough body parts for each attacker to attack a separate one, force them to
-	if len(viable_body_parts) > len(attackers):
-		for i in messages_attackers:
-			mult = 1
-			weapon = ""
+	for i in messages_attackers:
 
+		#if the user specified a weapon
+		if len(i.content.split()) > 3:
 			text = i.content.split()
 			del text[0:3]
 			text = " ".join(text)
 
-			#every attack with a weapon adds 1 to the stans' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
-			#also returns the memory number before the update ocurred (current memory - 1)
-			weapon_memory_mult = 1
-			#only updates weapon memory if a weapon was used
-			if len(i.content.split()) > 3:
-				mem_num = stan.update_weapon_memory(text)
+			#get this attack's combatant
+			combatant = get_combatant(combatants_present, i.author.id)
 
-				num = 1 - (mem_num * 0.10)
-				weapon_memory_mult = max([0.10, num])
-
-			if len(i.content.split()) > 3:
-				weapon, mult = get_weapon_info(text)
-
-			index = random.randrange(len(viable_body_parts))
-			damage = round(random.randrange(0, 50) * mult)
-			if weapon != "":	
-				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
-				damage = round((num / 2) * mult * weapon_memory_mult)
-
-			body_part = viable_body_parts[index]
-			del viable_body_parts[index]
-
-			attack = Combatant_Attack(i.author, damage, stan, body_part, weapon)
+			attack = Combatant_Attack(combatant, i.author.name, stan, True, text)
 			attacks.append(attack)
-	#if there is not enough body parts for each attacker to attack a seperate one, allow them to attack the same one
-	else:
-		for i in messages_attackers:
-			mult = 1
-			weapon = ""
+		else:
 
-			text = i.content.split()
-			del text[0:3]
-			text = " ".join(text)
+			#get this attack's combatant
+			combatant = get_combatant(combatants_present, i.author.id)
 
-			#every attack with a weapon adds 1 to the stans' weapon_memory_table at the key of the weapons name (without modifier, just whatever the person typed after attack)
-			#also returns the memory number before the update ocurred (current memory - 1)
-			weapon_memory_mult = 1
-			#only updates weapon memory if a weapon was used
-			if len(i.content.split()) > 3:
-				mem_num = stan.update_weapon_memory(text)
-
-				num = 1 - (mem_num * 0.10)
-				weapon_memory_mult = max([0.10, num])
-
-			if len(i.content.split()) > 3:
-				weapon, mult = get_weapon_info(text)
-
-			index = random.randrange(len(viable_body_parts))
-			damage = round(random.randrange(0, 50) * mult)
-			if weapon != "":	
-				num = int(str(int.from_bytes(text.encode(), "little"))[0:2])
-				damage = round((num / 2) * mult * weapon_memory_mult)
-
-			bopy_part = viable_body_parts[index]
-
-			attack = Combatant_Attack(i.author, damage, stan, body_part, weapon)
+			attack = Combatant_Attack(combatant, i.author.name, stan, False)
 			attacks.append(attack)
+
 
 	#determine if each attack hits other parts around it (total damage stays the same, just split among the parts)
 	for i in attacks:
@@ -217,13 +189,13 @@ async def combat_update(messages_attackers, channel, messages, stans,  stan):
 		if len(parts) > 1:
 			maybe_total = " total"
 		vowels = ["a", "e", "i", "o", "u"]
-		if i.weapon == "":
-			overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
+		if not i.weapon_specified:
+			overall_message += "_" + i.combatant_name + " attacked Stan's " + get_composite_noun(names) + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 		else:
 			if i.weapon[0] in vowels:
-				overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with an " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
+				overall_message += "_" + i.combatant_name + " attacked Stan's " + get_composite_noun(names) + " with an " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 			else:
-				overall_message += "_" + i.attacker.name + " attacked Stan's " + get_composite_noun(names) + " with a " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
+				overall_message += "_" + i.combatant_name + " attacked Stan's " + get_composite_noun(names) + " with a " + i.weapon + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 
 	#finds all body parts that were damaged and or killed
 	body_parts_affected = []
@@ -320,8 +292,29 @@ async def combat_update(messages_attackers, channel, messages, stans,  stan):
 		file.close()
 		await channel.send(file=discord.File(filename, channel.name + " combat log.txt"))
 		os.remove(filename)
-		return
-	
+		return	
+
+	stan_attacks = []
+	#stan retaliation
+	for i in attacks:
+		if i.retaliation:
+			stan_attacks.append(Stan_Attack(stan, i.combatant, i.combatant_name))
+
+	#stan attacks do their damage and send dms to the damage
+	for i in stan_attacks:
+		pass
+		i.resolve_attack()
+		await i.send_status()
+
+	#prints all who stan retaliated against
+	names = []
+	for i in stan_attacks:
+		if i.combatant_name not in names:
+			names.append(i.combatant_name)
+
+	if len(names) > 0:
+		overall_message += "**_Stan retaliated against " + get_composite_noun(names) + "!_**"
+
 	new_message = await channel.send(overall_message)
 	stan.log += overall_message + "\n"
 	messages.append(new_message)
@@ -374,25 +367,26 @@ async def create_combat_image(body):
 				if body_part.is_alive():
 					add_body_image(composite, image, (int(x), int(y)), get_color(body_part))
 
-	if body.uid == 0:
-		if body.head.is_alive():
+	if body.head.is_alive():
+		if body.uid == 0:
 			add_head_image(composite, "images/stanface.png", body)
-	else:
-		user = await client.fetch_user(body.uid)
-		file_name = "cache/" + hashlib.md5(str(body.uid).encode()).hexdigest() + ".png"
-		await user.avatar_url_as(format="png").save(file_name)
+		else:
+			user = await client.fetch_user(body.uid)
+			file_name = "cache/" + hashlib.md5(str(body.uid).encode()).hexdigest() + ".png"
+			await user.avatar_url_as(format="png", static_format="png", size=256).save(file_name)
 
-		image = Image.open(file_name).convert("RGBA")
-		image_mask = Image.open("images/head_mask.png").convert("RGBA")
-		image_empty = Image.open("images/empty_image.png").convert("RGBA")
+			image = Image.open(file_name).convert("RGBA")
+			image = image.resize((256, 256))
+			image_mask = Image.open("images/head_mask.png").convert("RGBA")
+			image_empty = Image.open("images/empty_image.png").convert("RGBA")
 
-		cropped = Image.composite(image, image_empty, image_mask)
-		cropped.save(file_name)
-		add_head_image(composite, file_name, body)
-		os.remove(file_name)
+			cropped = Image.composite(image, image_empty, image_mask)
+			cropped.save(file_name)
+			add_head_image(composite, file_name, body)
+			os.remove(file_name)
 
-
-	add_body_image(composite, image_healthbar, (512, 896), False)
+	#add healthbar
+	composite.alpha_composite(image_healthbar, tuple(map(sub, (512, 896), (round(image_healthbar.width/2), round(image_healthbar.height/2)))))
 
 	return composite
 
@@ -477,16 +471,6 @@ def get_composite_noun(words):
 				text += " and "
 	return text
 
-def get_weapon_info(name):
-	infos = open("text/weapon_attributes.txt", "r").readlines()
-
-	info = infos[random.randrange(len(infos))]
-
-	full_name = info.split(":")[0] + " " + name
-	mult = float(info.split(":")[1].strip())
-
-	return (full_name, mult)
-
 def save_combatants_data(combatants):
 	for i in combatants:
 		with open("combat_data/" + str(i.uid) + ".pkl", "wb") as output_file:
@@ -495,10 +479,15 @@ def save_combatants_data(combatants):
 def load_combatants_data():
 	combatants = []
 	for i in os.listdir("combat_data/"):
-		with open("combat_data/" + i) as input_file:
+		with open("combat_data/" + i, "rb") as input_file:
 			combatant = pickle.load(input_file)
 			combatants.append(combatant)
 	return combatants
+
+def get_combatant(combatants, uid):
+	for i in combatants:
+		if i.uid == uid:
+			return i
 
 class Stan:
 	def __init__(self, channel):
@@ -530,10 +519,56 @@ class Combatant:
 	def __init__(self, uid):
 		self.body = Body(uid)
 		self.uid = uid
+		self.xp = 0
+		self.dm_message_ids = []
 
 	async def get_user(self):
 		user = await client.fetch_user(self.uid)
 		return user
+
+	async def get_dm_channel(self):
+		user = await self.get_user()
+		channel = user.dm_channel
+		if channel == None:
+			channel = await user.create_dm()
+		return channel
+
+	async def get_name(self):
+		user = await self.get_user()
+		return user.name
+
+	async def dm_user(self, content=None, file=None):
+		channel = await self.get_dm_channel()
+		message = await channel.send(content, file=file)
+		self.dm_message_ids.append(message.id)
+		return message
+
+	async def get_dm_messages(self):
+		messages = []
+		user = await self.get_user()
+		for i in self.dm_message_ids:
+			try:
+				message = await user.fetch_message(i)
+				messages.append(message)
+			except:
+				pass
+		return messages
+
+	async def clear_dms(self):
+		channel = await self.get_dm_channel()
+		messages = await self.get_dm_messages()
+
+		while messages:
+			for i in messages:
+				try:
+					await i.delete()
+					messages.remove(i)
+				except (discord.Forbidden, discord.NotFound):
+					messages.remove(i)
+				except discord.HTTPException:
+					pass
+
+		self.dm_message_ids = []
 
 class Body:
 	def __init__(self, uid=0):
@@ -573,6 +608,8 @@ class Body:
 		self.max_health = self.get_current_total_health()
 
 		self.uid = uid
+
+		self.injury_multiplier = 1
 
 	def get(self, attrname):
 		return getattr(self, attrname)
@@ -634,6 +671,11 @@ class Body:
 			number += i.health
 		return number
 
+	def update_injury_multiplier(self):
+		num =  self.get_current_total_health() / self.max_health
+		self.injury_multiplier = num
+		return num
+
 	def die(self):
 		for i in self.body_parts:
 			del i
@@ -681,14 +723,54 @@ class Body_Part:
 		return dead_parts
 
 class Combatant_Attack:
-	def __init__(self, attacker, damage, stan, body_part, weapon=""):
-		self.attacker = attacker
-		self.damage = damage
+	def __init__(self, combatant, combatant_name, stan, weapon_specified=False, weapon=""):
+		self.combatant = combatant
+		self.combatant_name = combatant_name
 		self.stan = stan
-		self.body_part = body_part
+
+		attributes = open("text/weapon_attributes.txt", "r").readlines()
+		attribute = attributes[random.randrange(len(attributes))]
+
+		self.weapon = attribute.split(":")[0] + " " + weapon
+		self.weapon_specified = weapon_specified
+
+		mult = 1
+		damage = round(random.randrange(0, 51) * self.combatant.body.injury_multiplier)
+		if weapon_specified:
+			mem_num = self.stan.update_weapon_memory(weapon)
+
+			num = 1 - (mem_num * 0.10)
+			weapon_memory_mult = max([0.10, num])
+			mult = float(attribute.split(":")[1].strip())
+			num = int(str(int.from_bytes(weapon.encode(), "little"))[0:2])
+			damage = round((num / 2) * mult * weapon_memory_mult * self.combatant.body.injury_multiplier)
+
+		self.damage = damage
+
+		viable_body_parts = []
+		for i in stan.body.body_parts:
+			if i.is_alive():
+				viable_body_parts.append(i)
+
+		self.body_part = viable_body_parts[random.randrange(len(viable_body_parts))]
+
 		self.additional_body_parts = []
-		self.weapon = weapon
+		viable_body_parts = []
+		for i in self.body_part.related_parts:
+			if i.is_alive():
+				viable_body_parts.append(i)
+		add_more = True
+		while add_more:
+			if random.randrange(0, 3) == 1:
+				add_more = False
+			if len(viable_body_parts) < 1:
+				break
+			idx = random.randrange(len(viable_body_parts))
+			self.additional_body_parts.append(viable_body_parts[idx])
+			viable_body_parts.remove(viable_body_parts[idx])
+
 		self.parts_killed = []
+		self.retaliation = (random.randrange(0, 5) == 1)
 
 	def resolve_attack(self):
 
@@ -696,7 +778,7 @@ class Combatant_Attack:
 
 		split_damage = math.floor(self.damage / num)
 
-		self.stan.update_damage_table(self.attacker.name, split_damage * num)
+		self.stan.update_damage_table(self.combatant_name, split_damage * num)
 
 		body_parts_to_resolve = [self.body_part]
 		body_parts_to_resolve.extend(self.additional_body_parts)
@@ -706,9 +788,96 @@ class Combatant_Attack:
 			if i.health < 1:
 				self.parts_killed.extend(i.die())
 
-	def update_parts_killed(self, parts):
-		self.parts_killed = parts
+		self.stan.body.update_injury_multiplier()
 
 class Stan_Attack:
 
-	pass
+	def __init__(self, stan, combatant, combatant_name):
+		self.stan = stan
+		self.combatant = combatant
+		self.combatant_name = combatant_name
+
+		attributes = open("text/weapon_attributes.txt", "r").readlines()
+		weapon_prefixes = open("text/stan_weapons_prefix.txt", "r").readlines()
+		weapon_bases = open("text/stan_weapons_base.txt", "r").readlines()
+
+		attribute = attributes[random.randrange(len(attributes))]
+		weapon_prefix = weapon_prefixes[random.randrange(len(weapon_prefixes))].strip()
+		weapon_base = weapon_bases[random.randrange(len(weapon_bases))].strip()
+	
+		self.weapon = attribute.split(":")[0] + " " + weapon_prefix + weapon_base
+
+		mult = float(attribute.split(":")[1].strip())
+		self.damage = round(random.randrange(10, 101) * mult * self.stan.body.injury_multiplier)
+
+		viable_body_parts = []
+		for i in combatant.body.body_parts:
+			if i.is_alive():
+				viable_body_parts.append(i)
+
+		self.body_part = viable_body_parts[random.randrange(len(viable_body_parts))]
+
+		self.additional_body_parts = []
+		viable_body_parts = []
+		for i in self.body_part.related_parts:
+			if i.is_alive():
+				viable_body_parts.append(i)
+		add_more = True
+		while add_more:
+			if random.randrange(0, 3) == 1:
+				add_more = False
+			if len(viable_body_parts) < 1:
+				break
+			idx = random.randrange(len(viable_body_parts))
+			self.additional_body_parts.append(viable_body_parts[idx])
+			viable_body_parts.remove(viable_body_parts[idx])
+
+		self.parts_killed = []
+
+	def resolve_attack(self):
+
+		num = 1 + len(self.additional_body_parts)
+
+		split_damage = math.floor(self.damage / num)
+
+		body_parts_to_resolve = [self.body_part]
+		body_parts_to_resolve.extend(self.additional_body_parts)
+
+		for i in body_parts_to_resolve:
+			i.damage_part(split_damage)
+			if i.health < 1:
+				self.parts_killed.extend(i.die())
+
+		self.combatant.body.update_injury_multiplier()
+
+	async def send_status(self):
+
+		await self.combatant.clear_dms()
+
+		filename = "cache/" + hashlib.md5(str(self.combatant.uid).encode()).hexdigest() + ".png"
+		image = await create_combat_image(self.combatant.body)
+		image.save(filename)
+		await self.combatant.dm_user(file=discord.File(filename, "status.png"))
+		os.remove(filename)
+
+		message = ""
+		vowels = ["a", "e", "i", "o", "u"]
+		maybe_n = ""
+		for i in vowels:
+			if self.weapon.lower().startswith(i):
+				maybe_n = "n"			
+		names = self.get_affected_part_names()
+		if len(self.additional_body_parts) == 0:
+			message += "_Stan attacked your " + get_composite_noun(names) + " with a" + maybe_n + " " + self.weapon + " for " + str(self.damage) + " damage!_"
+		else:
+			message += "_Stan attacked your " + get_composite_noun(names) + " with a" + maybe_n + " " + self.weapon + " for " + str(self.damage) + " damage!_"
+		await self.combatant.dm_user(message)
+
+	def get_affected_part_names(self):
+		names = [self.body_part.name]
+
+		for i in self.additional_body_parts:
+			if i.name not in names:
+				names.append(i.name)
+
+		return names
