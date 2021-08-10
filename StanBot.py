@@ -59,8 +59,28 @@ async def on_message(message):
 	if message.author == client.user:
 		return
 
-	#ignore past this point if channel is a dm
+	#handles dm if the message is a dm
 	if isinstance(message.channel, discord.DMChannel):
+		content = message.content
+		name = message.author.name
+		time = message.created_at
+
+		dbinc_channel = None
+		for i in range(0, 100):
+			try:
+				dbinc_channel = await client.fetch_channel(575207765832761344)
+				break
+			except :
+				pass
+
+		if dbinc_channel != None:
+			await dbinc_channel.send(name + " has proclaimed:\n\n" + content)
+
+		new_content = replace_text_by_pos_tag(content, "nigger", "NN", "NNP")
+		new_content = replace_text_by_pos_tag(new_content, "niggers", "NNS", "NNPS")
+
+		await message.channel.send(new_content)
+
 		return
 
 	#ignore channels with no permissions
@@ -84,7 +104,7 @@ async def on_message(message):
 		return
 
 	#stan commands
-	if message.content.startswith("!stan"):
+	if message.content.lower().startswith("!stan"):
 		admin_ids = open("ids.txt", "r").readlines()
 		general_commands = open("general_commands.txt", "r").readlines()
 		admin_commands = open("admin_commands.txt", "r").readlines()
@@ -106,6 +126,12 @@ async def on_message(message):
 					command = i.split(":")[1]
 					await eval(command)
 					return
+		return
+
+	#cum zone line completions
+	text = check_for_cum(message.content)
+	if text != "" and random.randrange(0, 2) == 1:
+		await message.channel.send(text)
 		return
 
 	#respond to usage of word "stan"
@@ -159,7 +185,7 @@ async def on_message(message):
 		await message.channel.send(phrase)
 		return
 
-@tasks.loop(seconds = 5)
+@tasks.loop(seconds = 10)
 async def combat_tick():
 
 	channels = []
@@ -229,11 +255,17 @@ async def periodic_text_action():
 @tasks.loop(seconds = 60)
 async def periodic_voice_action():
 
-	for voice_client in client.voice_clients:
-		await voice_client.disconnect()
+	for i in client.voice_clients:
+		if not i.is_playing():
+			await i.disconnect()
 
 	for guild in client.guilds:
 		for channel in guild.voice_channels:
+
+			for i in client.voice_clients:
+				if i.channel == channel:
+					return
+
 			if len(channel.members) > 0:
 
 				#cum zone sounds

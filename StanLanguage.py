@@ -279,3 +279,22 @@ def advanced_auto_text_replace(text):
 
 	return new_text
 
+def check_for_cum(text):
+	output = ""
+	cum_lines_data = open("text/cum_zone_replacements.txt", "r").readlines()
+	cum_lines_prepared = []
+
+	for i in cum_lines_data:
+		pair = []
+		pair.append(i.split(":")[0])
+		pair.append(i.strip().split(":")[1].split(";"))
+		cum_lines_prepared.append(pair)
+
+
+	for idx, i in enumerate(cum_lines_prepared):
+		if text == i[0]:
+			output = i[1][random.randrange(len(i[1]))]
+			
+	return output
+
+
