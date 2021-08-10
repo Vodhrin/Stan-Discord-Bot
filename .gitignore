@@ -1,5 +1,6 @@
 /__pycache__
 /combat_data
+/cache
 token.txt
 id.txt
 ids.txt
