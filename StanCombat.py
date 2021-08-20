@@ -465,29 +465,6 @@ def add_head_image(image_background, file_name, body):
 	image.putdata(new_image_data)
 	image_background.alpha_composite(image, tuple(map(sub, position, image_offset)))
 
-#helper function for generating combat messages with appropriate uses of commas and ands when there is a composite subject or object
-def get_composite_noun(words):
-
-	text = ""
-
-	if len(words) == 1:
-		text += words[0]
-
-	if len(words) == 2:
-		for idx, i in enumerate(words):
-			text += i
-			if idx == 0:
-				text += " and "
-
-	if len(words) > 2:
-		for idx, i in enumerate(words):
-			text += i
-			if idx < (len(words) - 2):
-				text += ", "
-			if idx == (len(words) - 2):
-				text += " and "
-	return text
-
 #saves the list of combatants provided to disk
 #called at the end of every combat update tick only for the combatants that were relevant to that tick
 def save_combatants_data(combatants):

@@ -8,29 +8,24 @@ from PIL import Image, ImageFilter, ImageFont, ImageDraw
 
 from StanCombat import *
 from StanLanguage import *
+from StanTunes import *
 
 def commands_init(passed_client):
 	global client
 	client = passed_client
 
-	global ydl
-	ydl_opts = {
-	"cookiefile":"cookies.txt",
-	"outtmpl":"cache/%(id)s.%(ext)s",
-	"format": "bestaudio/best",
-	"postprocessors": [{
-	"key": "FFmpegExtractAudio",
-	"preferredcodec": "mp3",
-	"preferredquality": "192"
-	}]}
-
-	ydl = youtube_dl.YoutubeDL(ydl_opts)
-
 async def cmd_disconnect(message):
-	for voice_client in client.voice_clients:
-		if voice_client.guild is message.author.guild:
-			await voice_client.disconnect()
-			print("Disconnected from voice channel " + voice_client.channel.name)
+	for i in client.voice_clients:
+		if i.guild is message.author.guild:
+			await i.disconnect()
+			i.cleanup()
+			print("Disconnected from voice channel " + i.channel.name)
+
+async def cmd_mass_disconnect(message):
+	for i in client.voice_clients:
+		await i.disconnect()
+		i.cleanup()
+		print("Disconnected from voice channel " + i.channel.name)
 
 async def cmd_purge(message):
 	if message.channel.permissions_for(message.guild.me).manage_messages:
@@ -94,58 +89,12 @@ async def cmd_convert_to_int(message):
 
 async def cmd_play_youtube_link(message):
 
-	member = message.author
-	text_channel = message.channel
-	voice_channel = None
-	if member.voice == None or member.voice.channel == None:
-		await text_channel.send("Join a voice channel first, fagola.")
-		return
-	else:
-		voice_channel = member.voice.channel
-
-	link = message.content.split()[2]
-
-	shortened = False
-	if not link.startswith("https://www.youtube.com/watch"):
-		if not link.startswith("https://youtu.be/"):
-			await text_channel.send("Give me an actual link retard")
-			return
-		else:
-			shortened = True
-
-	already_connected = False
-	for i in client.voice_clients:
-		if i.channel == voice_channel:
-			already_connected = True
-
-	if not already_connected:
-		await voice_channel.connect()
-
-	voice_client = None
-	for i in client.voice_clients:
-		if i.channel == voice_channel:
-			voice_client = i
-
-	if voice_client == None:
-		await text_channel.send("I shit myself")
+	if len(message.content.split()) < 3:
 		return
 
-	loop = asyncio.get_event_loop()
-	method = ydl.download
-	args = [link]
-	await loop.run_in_executor(None, method, args)
-	filename = ""
-	if not shortened:
-		filename = "cache/" + link.split("=")[1].strip() + ".mp3"
-	else: 
-		filename = "cache/" + link.split("/")[3].strip() + ".mp3"
+	await tunes_query(message)
 
-	if not os.path.isfile(filename):
-		await text_channel.send("I shit myself")
-		return
 
-	audio = discord.FFmpegPCMAudio(filename)
-	voice_client.play(audio)
 
 def clean_message(message):
 	words = message.content.split(" ")

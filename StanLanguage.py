@@ -297,4 +297,24 @@ def check_for_cum(text):
 			
 	return output
 
+def get_composite_noun(words):
 
+	text = ""
+
+	if len(words) == 1:
+		text += words[0]
+
+	if len(words) == 2:
+		for idx, i in enumerate(words):
+			text += i
+			if idx == 0:
+				text += " and "
+
+	if len(words) > 2:
+		for idx, i in enumerate(words):
+			text += i
+			if idx < (len(words) - 2):
+				text += ", "
+			if idx == (len(words) - 2):
+				text += " and "
+	return text

@@ -16,6 +16,7 @@ from PIL.ImageColor import getrgb
 from StanLanguage import *
 from StanCombat import *
 from StanCommands import *
+from StanTunes import *
 
 TOKEN = open("token.txt","r").readline()
 
@@ -34,6 +35,7 @@ combat_messages_delete = []
 lanuage_init()
 commands_init(client)
 combat_init(client)
+tunes_init(client)
 
 @client.event
 async def on_ready():
@@ -62,24 +64,31 @@ async def on_message(message):
 	#handles dm if the message is a dm
 	if isinstance(message.channel, discord.DMChannel):
 		content = message.content
+		attachments = message.attachments
 		name = message.author.name
 		time = message.created_at
+
+		files = []
+		for i in attachments:
+			file = await i.to_file()
+			files.append(file)
 
 		dbinc_channel = None
 		for i in range(0, 100):
 			try:
 				dbinc_channel = await client.fetch_channel(575207765832761344)
 				break
-			except :
+			except:
 				pass
 
 		if dbinc_channel != None:
-			await dbinc_channel.send(name + " has proclaimed:\n\n" + content)
+			await dbinc_channel.send(name + " has proclaimed:\n\n" + content, files=files)
 
-		new_content = replace_text_by_pos_tag(content, "nigger", "NN", "NNP")
-		new_content = replace_text_by_pos_tag(new_content, "niggers", "NNS", "NNPS")
+		if len(content) > 0:
+			new_content = replace_text_by_pos_tag(content, "nigger", "NN", "NNP")
+			new_content = replace_text_by_pos_tag(new_content, "niggers", "NNS", "NNPS")
 
-		await message.channel.send(new_content)
+			await message.channel.send(new_content)
 
 		return
 
@@ -254,10 +263,6 @@ async def periodic_text_action():
 
 @tasks.loop(seconds = 60)
 async def periodic_voice_action():
-
-	for i in client.voice_clients:
-		if not i.is_playing():
-			await i.disconnect()
 
 	for guild in client.guilds:
 		for channel in guild.voice_channels:
