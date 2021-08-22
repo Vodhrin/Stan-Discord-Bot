@@ -9,10 +9,11 @@ import numpy
 from operator import sub
 from datetime import datetime
 from mutagen.mp3 import MP3
-from discord.ext import tasks
+from discord.ext import tasks, commands
 from PIL import Image, ImageFilter, ImageFont, ImageDraw
 from PIL.ImageColor import getrgb
 
+from Config import *
 from StanLanguage import *
 from StanCombat import *
 from StanCommands import *
@@ -20,22 +21,9 @@ from StanTunes import *
 
 TOKEN = open("token.txt","r").readline()
 
-intents = discord.Intents.default()
-intents.members = True
-intents.messages = True
-
-client = discord.Client(intents = intents)
-
-messages_to_delete = []
-combat_stans = []
-combat_messages_instigate = []
-combat_processing_flags = {}
-combat_messages_delete = []
-
 lanuage_init()
-commands_init(client)
-combat_init(client)
-tunes_init(client)
+combat_init()
+tunes_init()
 
 @client.event
 async def on_ready():
@@ -59,6 +47,10 @@ async def on_message(message):
 
 	#ignore his own messages
 	if message.author == client.user:
+		return
+
+	if message.content.startswith(prefix):
+		await client.process_commands(message)
 		return
 
 	#handles dm if the message is a dm
@@ -110,31 +102,6 @@ async def on_message(message):
 			response += " <adds>"
 
 		await message.channel.send(replace_text_tags(response))
-		return
-
-	#stan commands
-	if message.content.lower().startswith("!stan"):
-		admin_ids = open("ids.txt", "r").readlines()
-		general_commands = open("general_commands.txt", "r").readlines()
-		admin_commands = open("admin_commands.txt", "r").readlines()
-
-		if len(message.content.split()) < 2:
-			return
-
-		for i in admin_ids:
-			if str(message.author.id) == i.strip():
-				for i in admin_commands:
-					if i.startswith(message.content.split()[1]):
-						command = i.split(":")[1]
-						await eval(command)
-						return
-
-		else:
-			for i in general_commands:
-				if i.startswith(message.content.split()[1]):
-					command = i.split(":")[1]
-					await eval(command)
-					return
 		return
 
 	#cum zone line completions
@@ -194,30 +161,6 @@ async def on_message(message):
 		await message.channel.send(phrase)
 		return
 
-@tasks.loop(seconds = 10)
-async def combat_tick():
-
-	channels = []
-	for i in combat_messages_instigate:
-		if i.channel not in channels:
-			channels.append(i.channel)
-
-	for i in channels:
-
-		if i not in combat_processing_flags:
-			combat_processing_flags[i] = False
-
-		if not combat_processing_flags[i]:
-			message_group = []
-			for o in combat_messages_instigate:
-				if o.channel is i:
-					message_group.append(o)
-
-			for o in message_group:
-				combat_messages_instigate.remove(o)
-
-			await combat_query(message_group, combat_messages_delete, combat_stans, combat_processing_flags, i)
-
 @tasks.loop(seconds = 60)
 async def periodic_text_action():
 
@@ -242,7 +185,16 @@ async def periodic_text_action():
 				message = messages[random.randrange(len(messages))]
 				message = replace_text_tags(message)
 				message = message.replace("<mention>", member.mention)
-				new_message = await guild.system_channel.send(message)
+				channel = guild.system_channel
+				if channel == None or not channel.permissions_for(channel.guild.me).send_messages:
+					viable_channels = []
+					for i in guild.text_channels:
+						if i.permissions_for(channel.guild.me).send_messages and "announce" not in i.name:
+							viable_channels.append(i)
+					channel = random.choice(viable_channels)
+				if not channel.permissions_for(channel.guild.me).send_messages:
+					return
+				new_message = await channel.send(message)
 				messages_to_delete.append(new_message)
 				return
 
@@ -256,7 +208,8 @@ async def periodic_text_action():
 				if channel.permissions_for(channel.guild.me).send_messages and "announce" not in channel.name:
 					viable_channels.append(channel)
 			channel = viable_channels[random.randrange(len(viable_channels))]
-
+			if not channel.permissions_for(channel.guild.me).send_messages:
+				return
 			new_message = await channel.send(story)
 			messages_to_delete.append(new_message)
 			return
@@ -273,6 +226,21 @@ async def periodic_voice_action():
 
 			if len(channel.members) > 0:
 
+				#random sounds
+				if random.randrange(0, 215) == 1:
+					await channel.connect()
+					filenames = os.listdir("audio/random") 
+					filename = filenames[random.randrange(len(filenames))]
+					audio = discord.FFmpegPCMAudio("audio/random/" + filename)
+					audio_length_in_seconds = int(MP3("audio/random/" + filename).info.length)
+					for voice_client in client.voice_clients:
+			 			if voice_client.channel == channel:
+			 				voice_client.play(audio)
+			 				await asyncio.sleep(round(audio_length_in_seconds * 1.5))
+			 				voice_client.stop()
+			 				await voice_client.disconnect()
+			 				return
+
 				#cum zone sounds
 				if random.randrange(0, 76) == 1:
 					await channel.connect()
@@ -287,6 +255,8 @@ async def periodic_voice_action():
 			 				voice_client.stop()
 			 				await voice_client.disconnect()
 			 				return
+
+
 
 			 	#fart sound
 				if random.randrange(0, 46) == 1:
@@ -312,7 +282,6 @@ async def periodic_voice_action():
 			 				await voice_client.disconnect()
 			 				return
 
-combat_tick.start()
 periodic_voice_action.start()
 periodic_text_action.start()
 client.run(TOKEN)

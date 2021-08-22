@@ -1,16 +1,15 @@
-import spacy
+import discord
+from discord.ext import commands
 
-nlp = spacy.load("en_core_web_lg")
-doc = nlp("I ate the entire fucking fucnig fuckig and now my stomach feels like dogshit.")
+TOKEN = open("token.txt","r").readline()
 
-print()
+intents = discord.Intents.all()
 
-vectors = [doc[4].vector, doc[5].vector, doc[6].vector]
+client = commands.Bot(command_prefix='+', intents=intents)
 
-for i in vectors:
-    num = 0
-    for o in i:
-        num += o
+@client.command()
+async def poop(ctx):
+    await ctx.send("arg")
+    print("arg")
 
-    avg = num/len(i)
-    print(avg)
+client.run(TOKEN)

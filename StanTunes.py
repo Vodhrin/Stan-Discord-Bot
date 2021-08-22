@@ -11,12 +11,10 @@ import pickle
 from enum import Enum
 from discord.ext import tasks
 
+from Config import *
 from StanLanguage import *
 
-def tunes_init(passed_client):
-	global client
-	client = passed_client
-
+def tunes_init():
 	global voice_players
 	global songs
 	voice_players = []

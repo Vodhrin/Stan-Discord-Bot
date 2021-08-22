@@ -2,104 +2,84 @@ import discord
 import random
 import time
 import asyncio
-import youtube_dl
-import os
-from PIL import Image, ImageFilter, ImageFont, ImageDraw
+from discord.ext import commands
 
+from Config import *
 from StanCombat import *
 from StanLanguage import *
 from StanTunes import *
 
-def commands_init(passed_client):
-	global client
-	client = passed_client
+@client.command()
+async def poop(ctx):
+	await ctx.send("arg")
 
-async def cmd_disconnect(message):
+@client.command()
+async def disconnect(ctx):
 	for i in client.voice_clients:
-		if i.guild is message.author.guild:
+		if i.guild is ctx.author.guild:
 			await i.disconnect()
 			i.cleanup()
 			print("Disconnected from voice channel " + i.channel.name)
 
-async def cmd_mass_disconnect(message):
+@client.command()
+async def mass_disconnect(ctx):
 	for i in client.voice_clients:
 		await i.disconnect()
 		i.cleanup()
 		print("Disconnected from voice channel " + i.channel.name)
 
-async def cmd_purge(message):
-	if message.channel.permissions_for(message.guild.me).manage_messages:
-		await message.channel.purge(limit=10, check=is_me)
-		print(message.channel.name + " in the guild " + message.guild.name + " has been purged")
+@client.command()
+async def purge(ctx):
+	if ctx.channel.permissions_for(ctx.guild.me).manage_messages:
+		await ctx.channel.purge(limit=10, check=is_me)
+		print(ctx.channel.name + " in the guild " + ctx.guild.name + " has been purged")
 
-async def cmd_mass_purge():
+@client.command()
+async def mass_purge(ctx):
 	for guild in client.guilds:
 		for channel in guild.text_channels:
 			if channel.permissions_for(guild.me).manage_messages:
 				await channel.purge(limit=10, check=is_me)
 				print(channel.name + " in the guild " + guild.name + " has been purged")
 
-async def cmd_attempt_combat(message, messages_instigate, messages_delete, flags):
-	if not message.channel.permissions_for(message.guild.me).manage_messages:
+@client.command()
+async def combat(ctx):
+	if not ctx.channel.permissions_for(ctx.guild.me).manage_messages:
 
-		if message.channel.permissions_for(message.guild.me).send_messages:
+		if ctx.channel.permissions_for(ctx.guild.me).send_messages:
 			return
 
-		await message.channel.send("I can't do that here, retard.")
+		await ctx.send("I can't do that here, retard.")
 		return
 
-	if len(message.content.split()) < 3:
+	await ctx.channel.trigger_typing()
+	await query(ctx.channel, ctx.message)
+
+@client.command()
+async def play(ctx, arg):
+	if arg == None:
 		return
 
-	if message.channel not in flags:
-		flags[message.channel] = False
+	await tunes_query(ctx.message)
 
-	if flags[message.channel]:
-		messages_delete.append(message)
-		return
+@client.command()
+async def sussify(ctx, *, arg):
+	text = advanced_auto_text_replace(arg)
+	await ctx.send(text)
 
-	current_attackers = []
-	for i in messages_instigate:
-		current_attackers.append(i.author)
-
-	if message.author in current_attackers:
-		messages_delete.append(message)
-		return
-
-	await message.channel.trigger_typing()
-	messages_instigate.append(message)
-	
-async def cmd_sussify(message):
-	text = advanced_auto_text_replace(clean_message(message))
-	await message.channel.send(text)
-
-async def cmd_niggerfy(message):
-	new_content = replace_text_by_pos_tag(message.content, "nigger", "NN", "NNP")
+@client.command()
+async def niggerfy(ctx, *, arg):
+	new_content = replace_text_by_pos_tag(arg, "nigger", "NN", "NNP")
 	new_content = replace_text_by_pos_tag(new_content, "niggers", "NNS", "NNPS")
-	await message.channel.send(new_content)
+	await ctx.send(new_content)
 
-async def cmd_convert_to_int(message):
-	comps = message.content.split()
-
-	del comps[0:2]
-
-	text = " ".join(comps)
-
-	await message.channel.send(str(int.from_bytes(text.encode(), "little"))[0:2])
-
-async def cmd_play_youtube_link(message):
-
-	if len(message.content.split()) < 3:
+@client.command()
+async def get_weapon_damage(ctx, *, arg):
+	if ctx.author.id not in admin_ids:
 		return
+	num = int(str(int.from_bytes(arg.encode(), "little"))[0:2])
 
-	await tunes_query(message)
-
-
-
-def clean_message(message):
-	words = message.content.split(" ")
-	del words[0:2]
-	return " ".join(words)
+	await ctx.send(str(num/2))
 
 def is_me(m):
 	
