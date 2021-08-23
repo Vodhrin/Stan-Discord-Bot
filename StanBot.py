@@ -234,7 +234,7 @@ async def periodic_voice_action():
 					for voice_client in client.voice_clients:
 			 			if voice_client.channel == channel:
 			 				voice_client.play(audio)
-			 				await asyncio.sleep(round(audio_length_in_seconds * 1.5))
+			 				await asyncio.sleep(round(audio_length_in_seconds * 1.25))
 			 				voice_client.stop()
 			 				await voice_client.disconnect()
 			 				return

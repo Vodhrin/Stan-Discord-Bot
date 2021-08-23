@@ -2,6 +2,7 @@ import discord
 import random
 import time
 import asyncio
+import shelve
 from discord.ext import commands
 
 from Config import *
@@ -44,6 +45,10 @@ async def mass_purge(ctx):
 
 @client.command()
 async def combat(ctx):
+	if isinstance(ctx.channel, discord.DMChannel):
+		await ctx.send("I can't do that here, retard.")
+		return
+
 	if not ctx.channel.permissions_for(ctx.guild.me).manage_messages:
 
 		if ctx.channel.permissions_for(ctx.guild.me).send_messages:
@@ -53,7 +58,39 @@ async def combat(ctx):
 		return
 
 	await ctx.channel.trigger_typing()
-	await query(ctx.channel, ctx.message)
+	await query(QueryType.ATTACK, ctx.channel, ctx.message)
+
+@client.command(name="combat-status")
+async def combat_status(ctx):
+	if isinstance(ctx.channel, discord.DMChannel):
+		await ctx.send("I can't do that here, retard.")
+		return
+
+	if not ctx.channel.permissions_for(ctx.guild.me).manage_messages:
+
+		if ctx.channel.permissions_for(ctx.guild.me).send_messages:
+			return
+
+		await ctx.send("I can't do that here, retard.")
+		return
+
+	await query(QueryType.STATUS, ctx.channel, ctx.message)
+
+@client.command(name="combat-ability")
+async def combat_ability(ctx):
+	if isinstance(ctx.channel, discord.DMChannel):
+		await ctx.send("I can't do that here, retard.")
+		return
+
+	if not ctx.channel.permissions_for(ctx.guild.me).manage_messages:
+
+		if ctx.channel.permissions_for(ctx.guild.me).send_messages:
+			return
+
+		await ctx.send("I can't do that here, retard.")
+		return
+
+	await query(QueryType.ABILITY, ctx.channel, ctx.message)
 
 @client.command()
 async def play(ctx, arg):
@@ -74,6 +111,24 @@ async def niggerfy(ctx, *, arg):
 	await ctx.send(new_content)
 
 @client.command()
+async def suggest(ctx, *, arg):
+	path = "cache/suggestions.txt"
+	if os.path.isfile(path):
+		file = open(path, "r")
+		text = file.read()
+		file.close()
+	else:
+		text = ""
+	text += ctx.author.name
+	text += " - " + arg + "\n\n"
+	file = open(path, "w")
+	file.write(text)
+	file.close()
+
+	text = "Thank you for your <a> suggestion."
+	await ctx.send(replace_text_tags(text))
+
+@client.command()
 async def get_weapon_damage(ctx, *, arg):
 	if ctx.author.id not in admin_ids:
 		return
@@ -85,6 +140,8 @@ async def get_weapon_damage(ctx, *, arg):
 async def dbtest(ctx):
 	if ctx.author.id not in admin_ids:
 		return
+
+	shelve.open("combat_data/database")
 
 def is_me(m):
 	

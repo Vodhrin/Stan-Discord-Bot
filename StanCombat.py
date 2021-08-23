@@ -6,10 +6,7 @@ import hashlib
 import os
 import numpy
 import math
-import persistent
-import transaction
-import ZODB, ZODB.FileStorage
-import BTrees.OOBTree
+import shelve
 from enum import Enum
 from datetime import datetime
 from discord.ext import tasks
@@ -42,6 +39,13 @@ def combat_init():
 	# recent_messages is a dictionary with a channel as key and a list of messages as value which just tracks the most recent messages sent by the responder
 	# the only purpose of this is so that the most recent messages dont get deleted by the responder so that the recent combat update is still there if you take a short break
 
+	# the dbm(DatabaseManager) handles all reading and writing of stans and players from their respective databases on disk
+	# the cam(CacheManager) basically communicates between the dbm and the other managers
+	# the cam holds stans and players in memory(a dictionary) for around 20 minutes, then offloads them to disk
+	# if the player or stan is involved in an attack etc then the timer on that stan or player refreshes and it continues to stay in memory
+	# the plm(PlayerManager) handles regeneration of players health over time
+	# every minute, any injured players are healed for 1/15 of their max health, to ensure they are healed to max before the ~20 minute timer sends them back to disk (loading every player from disk to heal them is cancer)
+
 	global players
 	global stans
 	global handlers
@@ -49,8 +53,9 @@ def combat_init():
 	global counters
 	global channels_active
 	global recent_messages
-	global db
 	global dbm
+	global cam
+	global plm
 	players = []
 	stans = []
 	handlers = {}
@@ -59,26 +64,45 @@ def combat_init():
 	channels_active = {}
 	recent_messages = {}
 
-	storage = ZODB.FileStorage.FileStorage("combat_data/database.fs")
-	db = ZODB.DB(storage)
 	dbm = DatabaseManager()
+	cam = CacheManager()
+	plm = PlayerManager()
 
-async def query(channel, message):
+async def query(querytype, channel, message):
 
-	if channel not in handlers:
-		responders[channel] = Responder(channel)
-		handlers[channel] = RequestHandler(channel)
-		channels_active[channel] = True
-		recent_messages[channel] = []
+	if querytype == QueryType.ATTACK:
+		if channel not in handlers:
+			responders[channel] = Responder(channel)
+			handlers[channel] = RequestHandler(channel)
+			channels_active[channel] = True
+			recent_messages[channel] = []
+			handlers[channel].add_message(message)
+			await handlers[channel].wait_for_more_messages()
+			return
+		elif channels_active[channel] == False:
+			channels_active[channel] = True
+			handlers[channel].add_message(message)
+			await handlers[channel].wait_for_more_messages()
+
 		handlers[channel].add_message(message)
-		await handlers[channel].wait_for_more_messages()
-		return
-	elif channels_active[channel] == False:
-		channels_active[channel] = True
-		handlers[channel].add_message(message)
-		await handlers[channel].wait_for_more_messages()
 
-	handlers[channel].add_message(message)
+	elif querytype == QueryType.STATUS:
+		if channel not in handlers:
+			responders[channel] = Responder(channel)
+			handlers[channel] = RequestHandler(channel)
+			channels_active[channel] = False
+			recent_messages[channel] = []
+
+		await handlers[channel].status_request(message)
+
+
+	elif querytype == QueryType.ABILITY:
+		print("semen")
+
+class QueryType(Enum):
+	ATTACK = 0,
+	STATUS = 1,
+	ABILITY = 2,
 
 class RequestHandler:
 	def __init__(self, channel):
@@ -89,14 +113,14 @@ class RequestHandler:
 
 	def add_message(self, message):
 		self.messages.append(message)
-		responders[self.channel].messages.append(message)
+		self.responder.messages.append(message)
 
 	async def wait_for_more_messages(self):
 		before_amount = len(self.messages)
 		await asyncio.sleep(5)
 		#if no new messages have been added and self.messages is not empty
 		if before_amount == len(self.messages) and self.messages:
-			cm = await CombatManager.create(self.channel, self.messages)
+			cm = await AttackManager.create(self.channel, self.messages)
 			self.messages = []
 			if cm != None:
 				await self.responder.respond(cm.response)
@@ -113,6 +137,12 @@ class RequestHandler:
 				return
 			counters[self.channel] += 1
 			await self.wait_for_more_messages()
+
+	async def status_request(self, message):
+		cm = await StatusManager.create(self.channel, message)
+
+		await self.responder.respond_dm(cm.dm_response)
+		self.responder.messages.append(message)
 
 class Responder:
 	def __init__(self, channel):
@@ -216,18 +246,76 @@ class Response:
 		self.stan_killed = stan_killed
 		self.player = player
 
-class CombatManager:
-	@classmethod
-	async def create(cls, channel, messages):
-		self = CombatManager()
-		self.channel = channel
-		self.messages = messages
-		self.responder = responders[self.channel]
+class PlayerManager:
+	def __init__(self):
+		self.regeneration.start()
 
+	@tasks.loop(minutes = 1)
+	async def regeneration(self):
+		for i in cam.cached_players:
+
+			player = cam.cached_players[i][0]
+
+			split_heal = math.ceil(player.body.max_health / 15)
+
+			for o in player.body.body_parts:
+				if not o.is_alive():
+					o.resurrect()
+
+				if o.is_injured():
+					o.heal_part(split_heal)
+
+			player.body.update_state()
+			player.body.update_injury_multiplier()
+
+class CombatManager:
+	def __init__(self, channel):
+		self.channel = channel
+		self.responder = responders[self.channel]
 		self.image_generator = ImageGenerator()
 
-		self.stan = self.get_stan(stans, channel)
-		self.player_infos = self.get_player_infos(players, messages)
+	def get_stan(self, channel):
+		stan = cam.get_stan(channel.id)
+
+		if stan == None:
+			stan = Stan(channel.id)
+			cam.update_stan(stan)
+
+		return stan
+
+	def get_player(self, user):
+		player = cam.get_player(user.id)
+
+		if player == None:
+			player = Player(user.id, user.name)
+			cam.update_player(player)
+
+		return player
+
+	def get_player_infos(self, messages):
+		player_infos = {}
+		for i in messages:
+
+			weapon = i.content.replace("+combat", "").strip()
+
+			player = self.get_player(i.author)
+
+			if player not in player_infos:
+				player_infos[player] = weapon
+
+		return player_infos
+
+class AttackManager(CombatManager):
+	def __init__(self, channel):
+		super().__init__(channel)
+
+	@classmethod
+	async def create(cls, channel, messages):
+		self = AttackManager(channel)
+		self.messages = messages
+
+		self.stan = self.get_stan(channel)
+		self.player_infos = self.get_player_infos(messages)
 
 		#remove dead players from players
 		player_infos_clone = self.player_infos.copy()
@@ -236,7 +324,7 @@ class CombatManager:
 				user_image = await self.image_generator.generate(i.body)
 				percent = math.ceil(i.body.injury_multiplier * 100)
 				text = ""
-				text += "_**You are currently dead with " + str(percent) + "%" + " health left.**_\n_Your health will regenerate over time and your chance to revive increases as your healthpool increases._"
+				text += "_**You are currently dead with " + str(percent) + "%" + " health left.**_\n_Your health will regenerate over time._"
 				new_response = Response(user_image, text, False, i)
 				await self.responder.respond_dm(new_response)
 				del self.player_infos[i]
@@ -271,75 +359,19 @@ class CombatManager:
 			self.stan_killed = True
 
 		stan_image = await self.image_generator.generate(self.stan.body)
-		message_text = self.generate_message()
+		message_text = self.generate_attack_text()
 		self.response = Response(stan_image, message_text, self.stan_killed)
 		self.dm_responses = []
 		for i in self.stan_attacks:
-			message_text = self.generate_dm_message(i)
+			message_text = self.generate_retaliation_text(i)
 			user_image = await self.image_generator.generate(i.body_attacked)
 			self.dm_responses.append(Response(user_image, message_text, False, i.combatant_attacked))
 
-		if self.stan_killed:
-			self.stan.die()
+		self.save_all()
 
 		return self
 
-	def get_stan(self, stans, channel):
-		for i in stans:
-			if i.cid == channel.id:
-				return i
-
-		new_stan = Stan(channel.id)
-		stans.append(new_stan)
-		return new_stan
-
-	def get_player(self, players, uid):
-		for i in players:
-			if i.uid == uid:
-				return i
-
-	def get_player_infos(self, players, messages):
-		player_infos = {}
-		for i in messages:
-
-			weapon = i.content.replace("+combat", "").strip()
-
-			add_flag = True
-			for o in player_infos:
-				if o.uid == i.author.id:
-					add_flag = False
-			if add_flag:
-				added = False
-				for o in players:
-					if o.uid == i.author.id:
-						player_infos[o] = weapon
-						added = True
-				if not added:
-					new_player = Player(i.author.id, i.author.name)
-					player_infos[new_player] = weapon
-					players.append(new_player)
-		return player_infos
-
-	def get_players(self, players, messages):
-		players_present = []
-		for i in messages:
-			add_flag = True
-			for o in players_present:
-				if o.uid == i.author.id:
-					add_flag = False
-			if add_flag:
-				added = False
-				for o in players:
-					if o.uid == i.author.id:
-						players_present.append(o)
-						added = True
-				if not added:
-					new_player = Player(i.author.id)
-					players_present.append(new_player)
-					players.append(new_player)
-		return players_present
-
-	def generate_message(self):
+	def generate_attack_text(self):
 		text = ""
 
 		for i in self.player_attacks:
@@ -421,7 +453,7 @@ class CombatManager:
 
 		return text
 
-	def generate_dm_message(self, attack):
+	def generate_retaliation_text(self, attack):
 		text = ""
 
 		vowels = ["a", "e", "i", "o", "u"]
@@ -445,52 +477,168 @@ class CombatManager:
 
 		return text
 
+	def save_all(self):
+
+		if self.stan_killed:
+			cam.delete_stan(self.stan.cid)
+			self.stan.die()
+		else:
+			cam.update_stan(self.stan)
+
+		for i in self.player_infos:
+			cam.update_player(i)
+
+class StatusManager(CombatManager):
+	def __init__(self, channel):
+		super().__init__(channel)
+
+	@classmethod
+	async def create(cls, channel, message):
+		self = StatusManager(channel)
+		self.message = message
+
+		self.player = self.get_player(self.message.author)
+
+		if self.player == None:
+			self.player = self.create_player(self.message.author)
+
+		text = self.generate_status_text(self.player)
+
+		player_image = await self.image_generator.generate(self.player.body)
+
+		self.dm_response = Response(player_image, text, False, self.player)
+
+		return self
+
+	def generate_status_text(self, player):
+		text = ""
+
+		percent = math.ceil(player.body.injury_multiplier * 100)
+		text += "_You currently have " + str(percent) + "%" + " health left._" + "\n"
+
+		return text
+
 class DatabaseManager:
 	def __init__(self):
-		connection = db.open()
-		root = connection.root
-		root.players = BTrees.OOBTree.BTree()
-		root.stans = BTrees.OOBTree.BTree()
-		transaction.commit()
-		connection.close()
-
-	def save_stan(self, stan):
-		connection = db.open()
-		root = connection.root
-		root.stans[stan.cid] = stan
-		transaction.commit()
-		connection.close()
-
-	def get_stan(self, cid):
-		connection = db.open()
-		root = connection.root
-
-		if not root.stans.has_key(cid):
-			connection.close()
-			return None
-
-		stan = root.stans[cid]
-		connection.close()
-		return stan
+		self.players_db_path = "combat_data/players/players"
+		self.stans_db_path = "combat_data/stans/stans"
 
 	def save_player(self, player):
-		connection = db.open()
-		root = connection.root
-		root.players[player.uid] = player
-		transaction.commit()
-		connection.close()
+		db = shelve.open(self.players_db_path)
+		db[str(player.uid)] = player
+		db.close()
+
+	def delete_player(self, player):
+		db = shelve.open(self.players_db_path)
+
+		if not str(player.uid) in db:
+			return
+
+		del db[str(player.uid)]
+		db.close()
 
 	def get_player(self, uid):
-		connection = db.open()
-		root = connection.root
-		
-		if not root.stans.has_key(uid):
-			connection.close()
+		db = shelve.open(self.players_db_path)
+
+		if not str(uid) in db:
 			return None
 
-		player = root.players[uid]
-		connection.close()
+		player = db[str(uid)]
+		db.close()
 		return player
+
+	def save_stan(self, stan):
+		db = shelve.open(self.stans_db_path)
+		db[str(stan.cid)] = stan
+		db.close()
+
+	def delete_stan(self, stan):
+		db = shelve.open(self.stans_db_path)
+
+		if not str(stan.cid) in db:
+			return
+
+		del db[str(stan.cid)]
+		db.close()
+
+	def get_stan(self, cid):
+		db = shelve.open(self.stans_db_path)
+
+		if not str(cid) in db:
+			return None
+
+		player = db[str(cid)]
+		db.close()
+		return player
+
+class CacheManager:
+	def __init__(self):
+		self.cached_players = {}
+		self.cached_stans = {}
+		self.periodic_offload.start()
+
+	@tasks.loop(minutes = 5)
+	async def periodic_offload(self):
+
+		for i in self.cached_players:
+			difference = datetime.now() - self.cached_players[i][1]
+
+			if difference.total_seconds() > 1200:
+				self.offload_player(self.cached_players[i][0])
+
+		for i in self.cached_stans:
+			difference = datetime.now() - self.cached_stans[i][1]
+
+			if difference.total_seconds() > 1200:
+				self.offload_stan(self.cached_stans[i][0])
+
+	def update_player(self, player):
+		self.cached_players[player.uid] = (player, datetime.now())
+
+	def offload_player(self, player):
+		if player.uid not in self.cached_players:
+			return
+
+		dbm.save_player(stan)
+		del self.cached_players[player.uid][0]
+
+	def get_player(self, uid):
+		if uid not in self.cached_players:
+			player = dbm.get_player(uid)
+			return player
+
+		return self.cached_players[uid][0]
+
+	def delete_player(self, player):
+		if player.uid not in self.cached_players:
+			return
+
+		dbm.delete_player(player)
+		del self.cached_players[player.uid][0]
+
+	def update_stan(self, stan):
+		self.cached_stans[stan.cid] = (stan, datetime.now())
+
+	def offload_stan(self, stan):
+		if stan.cid not in self.cached_stans:
+			return
+
+		dbm.save_stan(stan)
+		del self.cached_stans[stan.cid][0]
+
+	def get_stan(self, cid):
+		if cid not in self.cached_stans:
+			stan = dbm.get_stan(cid)
+			return stan
+
+		return self.cached_stans[cid][0]
+
+	def delete_stan(self, stan):
+		if stan.cid not in self.cached_stans:
+			return
+
+		dbm.delete_stan(stan)
+		del self.cached_stans[stan.cid][0]
 
 class ImageGenerator:
 	def __init__(self):
@@ -768,7 +916,7 @@ class Body_Part:
 		return False
 
 	def damage_part(self, damage):
-		self.health = self.health - damage
+		self.health -= damage
 		return self.health
 
 	def heal_part(self, amount):
@@ -793,7 +941,7 @@ class Body_Part:
 			dead_parts.append(i)
 		return dead_parts
 
-class Combatant(persistent.Persistent):
+class Combatant:
 	def __init__(self, uid, cid):
 		self.uid = uid
 		self.cid = cid
@@ -804,20 +952,21 @@ class Player(Combatant):
 	def __init__(self, uid, name):
 		super().__init__(uid, 0)
 		self.name = name
-		self.health_update.start()
 
-	@tasks.loop(seconds=120.0)
-	async def health_update(self):
-		for i in self.body.body_parts:
-			if not i.is_alive():
-				i.resurrect()
-				continue
-			elif i.is_injured():
-				if random.randrange(0, 3) == 1:
-					i.heal_part(random.randrange(i.max_health))
+	# player cant be pickled if this is here
+	# needs to be handled by something else
+	# @tasks.loop(seconds=120.0)
+	# async def health_update(self):
+	# 	for i in self.body.body_parts:
+	# 		if not i.is_alive():
+	# 			i.resurrect()
+	# 			continue
+	# 		elif i.is_injured():
+	# 			if random.randrange(0, 3) == 1:
+	# 				i.heal_part(random.randrange(i.max_health))
 
-		self.body.update_state()
-		self.body.update_injury_multiplier()
+	# 	self.body.update_state()
+	# 	self.body.update_injury_multiplier()
 
 	async def get_user(self):
 		if self.uid != 0:
@@ -871,7 +1020,6 @@ class Stan(Combatant):
 			self.damage_table[combatant_name] += damage
 
 	def die(self):
-		stans.remove(self)
 		self.body.delete()
 		del self
 
@@ -965,3 +1113,5 @@ class Attack:
 					self.killed_parts.extend(i.die())
 
 			self.body_attacked.update_injury_multiplier()
+
+
