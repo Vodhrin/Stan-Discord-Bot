@@ -15,3 +15,6 @@ prefix = "+"
 intents = discord.Intents.all()
 
 client = commands.Bot(command_prefix=prefix, intents=intents)
+
+TOKEN1 = open("token1.txt","r").readline()
+TOKEN2 = open("token2.txt", "r").readline()

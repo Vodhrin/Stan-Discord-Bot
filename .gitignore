@@ -1,7 +1,8 @@
 /__pycache__
 /combat_data
 /cache
-token.txt
+token1.txt
+token2.txt
 id.txt
 ids.txt
 admin_commands.txt

@@ -81,6 +81,11 @@ async def get_weapon_damage(ctx, *, arg):
 
 	await ctx.send(str(num/2))
 
+@client.command()
+async def dbtest(ctx):
+	if ctx.author.id not in admin_ids:
+		return
+
 def is_me(m):
 	
     return m.author == client.user

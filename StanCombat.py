@@ -6,8 +6,10 @@ import hashlib
 import os
 import numpy
 import math
-import threading
-import pickle
+import persistent
+import transaction
+import ZODB, ZODB.FileStorage
+import BTrees.OOBTree
 from enum import Enum
 from datetime import datetime
 from discord.ext import tasks
@@ -19,23 +21,62 @@ from Config import *
 from StanLanguage import *
 
 def combat_init():
+
+	# players and stans are lists of all of the current player combatants and stan combatants involved in combat in any channel
+	# there is only one stan per channel at a time, but players are persistent across all channels
+	# stans are created when combat starts in a channel which has previously not had it, players are created in the first channel they start combat in and persist until the script ends (for now)
+
+	# handlers and responders are dictionaries where the key is the channel that they correspond to
+	# handlers handle all incoming +combat commands from specific channels
+	# responders handle all outgoing messages to specific channels
+	# dm messages are not handled by the responder, but instead by the player class corresponding to that user
+
+	# counters and channels_active are dictionaries that assist the responder and handler logic, the key is also the channel that they correspond to
+	# counters is used to prevent excessive recursion of the request handers
+	# because request handlers recursively check for more messages every 5 seconds, they would essentially continue checking forever if there was no counter
+	# therefore, the counter checks how many recursive loops the handler in that channel has gone through, if this goes above 10, the channel is assumed inactive
+	# inactive channels have their value set to false in the channels_active dictionary and the handler for that channel stops recursing
+	# when a new query comes to a channel marked inactive, the query function detects it and resets the handler so that it begins recursing again, and the loop continues
+	# this is all to prevent excessive recursion while still maintaining snappy (5 second) response time to requests
+
+	# recent_messages is a dictionary with a channel as key and a list of messages as value which just tracks the most recent messages sent by the responder
+	# the only purpose of this is so that the most recent messages dont get deleted by the responder so that the recent combat update is still there if you take a short break
+
 	global players
 	global stans
 	global handlers
 	global responders
+	global counters
+	global channels_active
+	global recent_messages
+	global db
+	global dbm
 	players = []
 	stans = []
 	handlers = {}
 	responders = {}
+	counters = {}
+	channels_active = {}
+	recent_messages = {}
+
+	storage = ZODB.FileStorage.FileStorage("combat_data/database.fs")
+	db = ZODB.DB(storage)
+	dbm = DatabaseManager()
 
 async def query(channel, message):
 
 	if channel not in handlers:
-		handlers[channel] = RequestHandler(channel)
 		responders[channel] = Responder(channel)
+		handlers[channel] = RequestHandler(channel)
+		channels_active[channel] = True
+		recent_messages[channel] = []
 		handlers[channel].add_message(message)
 		await handlers[channel].wait_for_more_messages()
 		return
+	elif channels_active[channel] == False:
+		channels_active[channel] = True
+		handlers[channel].add_message(message)
+		await handlers[channel].wait_for_more_messages()
 
 	handlers[channel].add_message(message)
 
@@ -43,6 +84,8 @@ class RequestHandler:
 	def __init__(self, channel):
 		self.channel = channel
 		self.messages = []
+		self.responder = responders[self.channel]
+		counters[self.channel] = 0
 
 	def add_message(self, message):
 		self.messages.append(message)
@@ -51,16 +94,24 @@ class RequestHandler:
 	async def wait_for_more_messages(self):
 		before_amount = len(self.messages)
 		await asyncio.sleep(5)
-		#if no new messages have been added
+		#if no new messages have been added and self.messages is not empty
 		if before_amount == len(self.messages) and self.messages:
 			cm = await CombatManager.create(self.channel, self.messages)
-			if cm != None:
-				await responders[self.channel].respond(cm.response)
-				for i in cm.dm_responses:
-					await responders[self.channel].respond_dm(i)
 			self.messages = []
+			if cm != None:
+				await self.responder.respond(cm.response)
+				for i in cm.dm_responses:
+					await self.responder.respond_dm(i)
+			counters[self.channel] = 0
+			await self.wait_for_more_messages()
+		elif self.messages:
+			counters[self.channel] = 0
 			await self.wait_for_more_messages()
 		else:
+			if counters[self.channel] >= 10:
+				channels_active[self.channel] = False
+				return
+			counters[self.channel] += 1
 			await self.wait_for_more_messages()
 
 class Responder:
@@ -79,16 +130,19 @@ class Responder:
 
 	def cache_log(self):
 		file = open(self.log_filename, "w")
-		file.write(self.log)
+		try:
+			file.write(self.log)
+		except:
+			file.close()
+			return None
 		file.close()
-		return discord.File(self.log_filename, "combat log.txt")
+		return discord.File(self.log_filename, "combatlog.txt")
 
 	def clear_cache(self):
 		try:
 			os.remove(self.image_filename)
 		except:
 			pass
-
 		try:
 			os.remove(self.log_filename)
 		except:
@@ -100,6 +154,8 @@ class Responder:
 	@tasks.loop(seconds=10.0)
 	async def delete_messages(self):
 		for i in self.messages:
+			if i in recent_messages[i.channel]:
+				continue
 			difference = datetime.utcnow() - i.created_at
 			if difference.total_seconds() > 30:
 				try:
@@ -109,7 +165,23 @@ class Responder:
 					pass
 
 	async def send_message(self, content=None, file=None, delete=True):
+		if (content == None or content == "") and file == None:
+			return
 		new_message = await self.channel.send(content=content, file=file)
+
+		if len(recent_messages[self.channel]) < 2:
+			recent_messages[self.channel].append(new_message)
+		elif len(recent_messages[self.channel]) == 2:
+			recent_messages[self.channel].pop(0)
+			recent_messages[self.channel].append(new_message)
+		else:
+			difference = len(recent_messages[self.channel]) - 3
+
+			for i in range(difference):
+				recent_messages[self.channel].pop(0)
+
+			recent_messages[self.channel].append(new_message)
+
 		if delete:
 			self.messages.append(new_message)
 
@@ -124,7 +196,11 @@ class Responder:
 			log_file = self.cache_log()
 			self.clear_log()
 		await self.send_message(file=image_file)
-		await self.send_message(content=response.text, file=log_file, delete=False)
+		await self.send_message(content=response.text, file=log_file)
+		try:
+			await self.send_message(file=log_file, delete=False)
+		except:
+			pass
 		self.clear_cache()
 
 	async def respond_dm(self, response):
@@ -133,13 +209,20 @@ class Responder:
 		await response.player.dm_user(content=response.text)
 		self.clear_cache()
 
+class Response:
+	def __init__(self, image, text, stan_killed, player=None):
+		self.image = image
+		self.text = text
+		self.stan_killed = stan_killed
+		self.player = player
+
 class CombatManager:
 	@classmethod
 	async def create(cls, channel, messages):
 		self = CombatManager()
 		self.channel = channel
-		self.responder = responders[channel]
 		self.messages = messages
+		self.responder = responders[self.channel]
 
 		self.image_generator = ImageGenerator()
 
@@ -203,10 +286,10 @@ class CombatManager:
 
 	def get_stan(self, stans, channel):
 		for i in stans:
-			if i.channel == channel:
+			if i.cid == channel.id:
 				return i
 
-		new_stan = Stan(channel)
+		new_stan = Stan(channel.id)
 		stans.append(new_stan)
 		return new_stan
 
@@ -305,7 +388,7 @@ class CombatManager:
 		#dead parts
 		if len(total_killed_parts) > 0:
 			if len(total_killed_parts) == 1:
-				"**_Stan's " + total_killed_parts[0].name + " is now destroyed!_**" + "\n"
+				text += "**_Stan's " + total_killed_parts[0].name + " is now destroyed!_**" + "\n"
 			else:
 				total_killed_parts_names = []
 				for i in total_killed_parts:
@@ -321,8 +404,9 @@ class CombatManager:
 				for i in self.retaliation_dict:
 					retaliated_player_names = []
 					for o in self.retaliation_dict:
-						if o.name not in retaliated_player_names:
-							retaliated_player_names.append(o.name)
+						if self.retaliation_dict[o]:
+							if o.name not in retaliated_player_names:
+								retaliated_player_names.append(o.name)
 				text += "**_Stan retaliated against " + get_composite_noun(retaliated_player_names) + "!_**" + "\n"
 
 		if self.stan_killed:
@@ -334,7 +418,6 @@ class CombatManager:
 			if len(sorted_damage_table) > 0:
 				for idx, i in enumerate(sorted_damage_table):
 					text += str(idx + 1) + ". " + sorted_damage_table[idx][0] + " --- " + str(sorted_damage_table[idx][1]) + " total damage" + "\n"
-			text += "**I can cum again in 20 seconds**"
 
 		return text
 
@@ -362,12 +445,52 @@ class CombatManager:
 
 		return text
 
-class Response:
-	def __init__(self, image, text, stan_killed, player=None):
-		self.image = image
-		self.text = text
-		self.stan_killed = stan_killed
-		self.player = player
+class DatabaseManager:
+	def __init__(self):
+		connection = db.open()
+		root = connection.root
+		root.players = BTrees.OOBTree.BTree()
+		root.stans = BTrees.OOBTree.BTree()
+		transaction.commit()
+		connection.close()
+
+	def save_stan(self, stan):
+		connection = db.open()
+		root = connection.root
+		root.stans[stan.cid] = stan
+		transaction.commit()
+		connection.close()
+
+	def get_stan(self, cid):
+		connection = db.open()
+		root = connection.root
+
+		if not root.stans.has_key(cid):
+			connection.close()
+			return None
+
+		stan = root.stans[cid]
+		connection.close()
+		return stan
+
+	def save_player(self, player):
+		connection = db.open()
+		root = connection.root
+		root.players[player.uid] = player
+		transaction.commit()
+		connection.close()
+
+	def get_player(self, uid):
+		connection = db.open()
+		root = connection.root
+		
+		if not root.stans.has_key(uid):
+			connection.close()
+			return None
+
+		player = root.players[uid]
+		connection.close()
+		return player
 
 class ImageGenerator:
 	def __init__(self):
@@ -382,7 +505,7 @@ class ImageGenerator:
 		file_name = ""
 		if body.get_current_total_health() > 501:
 			mult = (body.get_current_total_health() - 500) / (body.max_health - 500)
-			file_name = "images/healthbar/" + str(56 - round(mult * 55)) + ".png"
+			file_name = "images/healthbar/" + str(min(56 - round(mult * 55), 55)) + ".png"
 		else:
 			file_name  = "images/healthbar/55.png"
 
@@ -670,15 +793,16 @@ class Body_Part:
 			dead_parts.append(i)
 		return dead_parts
 
-class Combatant:
-	def __init__(self, uid):
+class Combatant(persistent.Persistent):
+	def __init__(self, uid, cid):
 		self.uid = uid
+		self.cid = cid
 		self.body = Body(self.uid)
 		self.xp = 0
 
 class Player(Combatant):
 	def __init__(self, uid, name):
-		super().__init__(uid)
+		super().__init__(uid, 0)
 		self.name = name
 		self.health_update.start()
 
@@ -720,14 +844,16 @@ class Player(Combatant):
 			return None
 
 	async def dm_user(self, content=None, file=None):
+		if (content == None or content == "") and file == None:
+			return
 		channel = await self.get_dm_channel()
 		new_message = await channel.send(content=content, file=file)
 		return new_message
 
 class Stan(Combatant):
-	def __init__(self, channel):
-		super().__init__(0)
-		self.channel = channel
+	def __init__(self, cid):
+		super().__init__(0, cid)
+		self.cid = cid
 		self.weapon_memory_table = {}
 		self.damage_table = {}
 
@@ -745,8 +871,8 @@ class Stan(Combatant):
 			self.damage_table[combatant_name] += damage
 
 	def die(self):
-		self.body.delete()
 		stans.remove(self)
+		self.body.delete()
 		del self
 
 class Attack:

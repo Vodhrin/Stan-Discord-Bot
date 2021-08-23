@@ -19,8 +19,6 @@ from StanCombat import *
 from StanCommands import *
 from StanTunes import *
 
-TOKEN = open("token.txt","r").readline()
-
 lanuage_init()
 combat_init()
 tunes_init()
@@ -173,7 +171,7 @@ async def periodic_text_action():
 
 
 	for guild in client.guilds:
-		if random.randrange(0, 251) == 1:
+		if random.randrange(0, 1001) == 1:
 			flag = True
 			viable_members = []
 			for member in guild.members:
@@ -189,7 +187,7 @@ async def periodic_text_action():
 				if channel == None or not channel.permissions_for(channel.guild.me).send_messages:
 					viable_channels = []
 					for i in guild.text_channels:
-						if i.permissions_for(channel.guild.me).send_messages and "announce" not in i.name:
+						if i.permissions_for(i.guild.me).send_messages and "announce" not in i.name:
 							viable_channels.append(i)
 					channel = random.choice(viable_channels)
 				if not channel.permissions_for(channel.guild.me).send_messages:
@@ -256,8 +254,6 @@ async def periodic_voice_action():
 			 				await voice_client.disconnect()
 			 				return
 
-
-
 			 	#fart sound
 				if random.randrange(0, 46) == 1:
 			 		await channel.connect()
@@ -284,4 +280,4 @@ async def periodic_voice_action():
 
 periodic_voice_action.start()
 periodic_text_action.start()
-client.run(TOKEN)
+client.run(TOKEN1)
