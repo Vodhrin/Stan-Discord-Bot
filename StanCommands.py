@@ -10,11 +10,12 @@ from StanCombat import *
 from StanLanguage import *
 from StanTunes import *
 
-@client.command()
-async def poop(ctx):
-	await ctx.send("arg")
+async def is_admin(ctx):
+
+	return ctx.author.id in admin_ids
 
 @client.command()
+@commands.check(is_admin)
 async def disconnect(ctx):
 	for i in client.voice_clients:
 		if i.guild is ctx.author.guild:
@@ -23,6 +24,7 @@ async def disconnect(ctx):
 			print("Disconnected from voice channel " + i.channel.name)
 
 @client.command()
+@commands.check(is_admin)
 async def mass_disconnect(ctx):
 	for i in client.voice_clients:
 		await i.disconnect()
@@ -30,12 +32,14 @@ async def mass_disconnect(ctx):
 		print("Disconnected from voice channel " + i.channel.name)
 
 @client.command()
+@commands.check(is_admin)
 async def purge(ctx):
 	if ctx.channel.permissions_for(ctx.guild.me).manage_messages:
 		await ctx.channel.purge(limit=10, check=is_me)
 		print(ctx.channel.name + " in the guild " + ctx.guild.name + " has been purged")
 
 @client.command()
+@commands.check(is_admin)
 async def mass_purge(ctx):
 	for guild in client.guilds:
 		for channel in guild.text_channels:
@@ -92,6 +96,12 @@ async def combat_ability(ctx):
 
 	await query(QueryType.ABILITY, ctx.channel, ctx.message)
 
+@client.command(name="combat-reset-stan")
+@commands.check(is_admin)
+async def combat_reset_stan(ctx):
+
+	await query(QueryType.RESET_STAN, ctx.channel, ctx.message)
+
 @client.command()
 async def play(ctx, arg):
 	if arg == None:
@@ -135,9 +145,8 @@ async def suggest(ctx, *, arg):
 	await ctx.send(replace_text_tags(text))
 
 @client.command()
+@commands.check(is_admin)
 async def get_weapon_damage(ctx, *, arg):
-	if ctx.author.id not in admin_ids:
-		return
 	num = int(str(int.from_bytes(arg.encode(), "little"))[0:2])
 
 	await ctx.send(str(num/2))
@@ -146,8 +155,6 @@ async def get_weapon_damage(ctx, *, arg):
 async def dbtest(ctx):
 	if ctx.author.id not in admin_ids:
 		return
-
-	shelve.open("combat_data/database")
 
 def is_me(m):
 	

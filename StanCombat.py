@@ -99,10 +99,16 @@ async def query(querytype, channel, message):
 	elif querytype == QueryType.ABILITY:
 		print("semen")
 
+	elif querytype == QueryType.RESET_STAN:
+		cam.delete_stan_cid(channel.id)
+
+		print("Stan reset in (" + channel.name + ":" + channel.guild.name + ")")
+
 class QueryType(Enum):
 	ATTACK = 0,
 	STATUS = 1,
 	ABILITY = 2,
+	RESET_STAN = 3,
 
 class RequestHandler:
 	def __init__(self, channel):
@@ -127,6 +133,7 @@ class RequestHandler:
 				for i in cm.dm_responses:
 					await self.responder.respond_dm(i)
 			counters[self.channel] = 0
+			del cm
 			await self.wait_for_more_messages()
 		elif self.messages:
 			counters[self.channel] = 0
@@ -301,8 +308,7 @@ class CombatManager:
 
 			player = self.get_player(i.author)
 
-			if player not in player_infos:
-				player_infos[player] = weapon
+			player_infos[player.uid] = (player, weapon)
 
 		return player_infos
 
@@ -316,38 +322,33 @@ class AttackManager(CombatManager):
 		self.messages = messages
 
 		self.stan = self.get_stan(channel)
-		self.player_infos = self.get_player_infos(messages)
+		self.player_infos = self.get_player_infos(self.messages)
 
 		#remove dead players from players
 		player_infos_clone = self.player_infos.copy()
-		for i in player_infos_clone:
-			if i.body.state == State.DEAD:
-				user_image = await self.image_generator.generate(i.body)
-				percent = math.ceil(i.body.injury_multiplier * 100)
+		for i in player_infos_clone.values():
+			if i[0].body.state == State.DEAD:
+				user_image = await self.image_generator.generate(i[0].body)
+				percent = math.ceil(i[0].body.injury_multiplier * 100)
 				text = ""
 				text += "_**You are currently dead with " + str(percent) + "%" + " health left.**_\n_Your health will regenerate over time._"
-				new_response = Response(user_image, text, False, i)
+				new_response = Response(user_image, text, False, i[0])
 				await self.responder.respond_dm(new_response)
-				del self.player_infos[i]
+				del self.player_infos[i[0]]
 
 		if len(self.player_infos) < 1:
 			return None
-
-		self.player_names = {}
-		for i in self.player_infos:
-			name = await i.get_name()
-			self.player_names[i] = name
 
 		self.attacks = []
 		self.player_attacks = []
 		self.stan_attacks = []
 		self.retaliation_dict = {}
 
-		for i in self.player_infos:
-			new_attack = Attack(i, self.stan, self.player_infos[i])
+		for i in self.player_infos.values():
+			new_attack = Attack(i[0], self.stan, i[1])
 			self.attacks.append(new_attack)
 			self.player_attacks.append(new_attack)
-			self.retaliation_dict[i] = random.randrange(0, 5) == 1
+			self.retaliation_dict[i[0]] = random.randrange(0, 5) == 1
 
 		for i in self.retaliation_dict:
 			if self.retaliation_dict[i]:
@@ -391,9 +392,9 @@ class AttackManager(CombatManager):
 				attacked_part_names.append(o.name)
 
 			if i.weapon == "":
-				text += "_" + self.player_names[i.combatant_attacker] + " attacked Stan's " + get_composite_noun(attacked_part_names) + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
+				text += "_" + i.combatant_attacker.name + " attacked Stan's " + get_composite_noun(attacked_part_names) + " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 			else:
-				text += "_" + self.player_names[i.combatant_attacker] + " attacked Stan's " + get_composite_noun(attacked_part_names) + " with a" + maybe_n + " " + i.weapon +  " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
+				text += "_" + i.combatant_attacker.name + " attacked Stan's " + get_composite_noun(attacked_part_names) + " with a" + maybe_n + " " + i.weapon +  " for " + str(i.damage) + maybe_total + " damage!_" + "\n"
 
 		total_killed_parts = []
 		for i in self.player_attacks:
@@ -486,8 +487,8 @@ class AttackManager(CombatManager):
 		else:
 			cam.update_stan(self.stan)
 
-		for i in self.player_infos:
-			cam.update_player(i)
+		for i in self.player_infos.values():
+			cam.update_player(i[0])
 
 class StatusManager(CombatManager):
 	def __init__(self, channel):
@@ -603,6 +604,7 @@ class CacheManager:
 			self.offload_stan(self.cached_stans[i.cid][0])
 
 	def update_player(self, player):
+
 		self.cached_players[player.uid] = (player, datetime.now())
 
 	def offload_player(self, player):
@@ -615,18 +617,35 @@ class CacheManager:
 	def get_player(self, uid):
 		if uid not in self.cached_players:
 			player = dbm.get_player(uid)
+			if player != None:
+				self.update_player(player)
 			return player
 
 		return self.cached_players[uid][0]
 
 	def delete_player(self, player):
+		dbm.delete_player(player)
+
 		if player.uid not in self.cached_players:
 			return
 
+		del self.cached_players[player.uid]
+
+	def delete_player_uid(self, uid):
+		player = self.get_player(uid)
+
+		if player == None:
+			return
+
 		dbm.delete_player(player)
+
+		if player.uid not in self.cached_players:
+			return
+
 		del self.cached_players[player.uid]
 
 	def update_stan(self, stan):
+
 		self.cached_stans[stan.cid] = (stan, datetime.now())
 
 	def offload_stan(self, stan):
@@ -639,15 +658,31 @@ class CacheManager:
 	def get_stan(self, cid):
 		if cid not in self.cached_stans:
 			stan = dbm.get_stan(cid)
+			if stan != None:
+				self.update_stan(stan)
 			return stan
 
 		return self.cached_stans[cid][0]
 
 	def delete_stan(self, stan):
+		dbm.delete_stan(stan)
+
 		if stan.cid not in self.cached_stans:
 			return
 
+		del self.cached_stans[stan.cid]
+
+	def delete_stan_cid(self, cid):
+		stan = self.get_stan(cid)
+
+		if stan == None:
+			return
+
 		dbm.delete_stan(stan)
+
+		if stan.cid not in self.cached_stans:
+			return
+
 		del self.cached_stans[stan.cid]
 
 class ImageGenerator:
