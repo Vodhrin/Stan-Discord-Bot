@@ -134,6 +134,7 @@ class RequestHandler:
 		else:
 			if counters[self.channel] >= 10:
 				channels_active[self.channel] = False
+				self.messages = []
 				return
 			counters[self.channel] += 1
 			await self.wait_for_more_messages()
@@ -480,7 +481,7 @@ class AttackManager(CombatManager):
 	def save_all(self):
 
 		if self.stan_killed:
-			cam.delete_stan(self.stan.cid)
+			cam.delete_stan(self.stan)
 			self.stan.die()
 		else:
 			cam.update_stan(self.stan)
@@ -580,17 +581,26 @@ class CacheManager:
 	@tasks.loop(minutes = 5)
 	async def periodic_offload(self):
 
+		players_queued_for_offload = []
+		stans_queued_for_offload = []
+
 		for i in self.cached_players:
 			difference = datetime.now() - self.cached_players[i][1]
 
 			if difference.total_seconds() > 1200:
-				self.offload_player(self.cached_players[i][0])
+				players_queued_for_offload.append(self.cached_players[i][0])
+
+		for i in players_queued_for_offload:
+			self.offload_player(self.cached_players[i.uid][0])
 
 		for i in self.cached_stans:
 			difference = datetime.now() - self.cached_stans[i][1]
 
 			if difference.total_seconds() > 1200:
-				self.offload_stan(self.cached_stans[i][0])
+				stans_queued_for_offload.append(self.cached_stans[i][0])
+
+		for i  in stans_queued_for_offload:
+			self.offload_stan(self.cached_stans[i.cid][0])
 
 	def update_player(self, player):
 		self.cached_players[player.uid] = (player, datetime.now())
@@ -599,8 +609,8 @@ class CacheManager:
 		if player.uid not in self.cached_players:
 			return
 
-		dbm.save_player(stan)
-		del self.cached_players[player.uid][0]
+		dbm.save_player(player)
+		del self.cached_players[player.uid]
 
 	def get_player(self, uid):
 		if uid not in self.cached_players:
@@ -614,7 +624,7 @@ class CacheManager:
 			return
 
 		dbm.delete_player(player)
-		del self.cached_players[player.uid][0]
+		del self.cached_players[player.uid]
 
 	def update_stan(self, stan):
 		self.cached_stans[stan.cid] = (stan, datetime.now())
@@ -624,7 +634,7 @@ class CacheManager:
 			return
 
 		dbm.save_stan(stan)
-		del self.cached_stans[stan.cid][0]
+		del self.cached_stans[stan.cid]
 
 	def get_stan(self, cid):
 		if cid not in self.cached_stans:
@@ -638,7 +648,7 @@ class CacheManager:
 			return
 
 		dbm.delete_stan(stan)
-		del self.cached_stans[stan.cid][0]
+		del self.cached_stans[stan.cid]
 
 class ImageGenerator:
 	def __init__(self):

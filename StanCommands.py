@@ -102,13 +102,19 @@ async def play(ctx, arg):
 @client.command()
 async def sussify(ctx, *, arg):
 	text = advanced_auto_text_replace(arg)
-	await ctx.send(text)
+	try:
+		await ctx.send(text)
+	except:
+		await ctx.send(replace_text_tags("I <ad> shit myself"))
 
 @client.command()
 async def niggerfy(ctx, *, arg):
 	new_content = replace_text_by_pos_tag(arg, "nigger", "NN", "NNP")
 	new_content = replace_text_by_pos_tag(new_content, "niggers", "NNS", "NNPS")
-	await ctx.send(new_content)
+	try:
+		await ctx.send(new_content)
+	except:
+		await ctx.send(replace_text_tags("I <ad> shit myself"))
 
 @client.command()
 async def suggest(ctx, *, arg):
