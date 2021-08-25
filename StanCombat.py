@@ -43,8 +43,9 @@ def combat_init():
 	# the cam(CacheManager) basically communicates between the dbm and the other managers
 	# the cam holds stans and players in memory(a dictionary) for around 20 minutes, then offloads them to disk
 	# if the player or stan is involved in an attack etc then the timer on that stan or player refreshes and it continues to stay in memory
-	# the plm(PlayerManager) handles regeneration of players health over time
-	# every minute, any injured players are healed for 1/15 of their max health, to ensure they are healed to max before the ~20 minute timer sends them back to disk (loading every player from disk to heal them is cancer)
+	# the ctm(CombatantManager) handles retrieving saved players and stans or creating new ones for use in combat
+	# it also prepares these retrieved combatants by telling them to calculate how much health they should regenerate based on the last time they were attacked
+	# overall, the path for retrieving a combatant goes ctm > cam > dbm, and if this does not find a saved player in either cache or in the database, a new one is created
 
 	global players
 	global stans
@@ -55,7 +56,7 @@ def combat_init():
 	global recent_messages
 	global dbm
 	global cam
-	global plm
+	global ctm
 	players = []
 	stans = []
 	handlers = {}
@@ -66,7 +67,7 @@ def combat_init():
 
 	dbm = DatabaseManager()
 	cam = CacheManager()
-	plm = PlayerManager()
+	ctm = CombatantManager()
 
 async def query(querytype, channel, message):
 
@@ -254,42 +255,10 @@ class Response:
 		self.stan_killed = stan_killed
 		self.player = player
 
-class PlayerManager:
-	def __init__(self):
-		self.regeneration.start()
+class CombatantManager:
+	def prepare_combatant(self, combatant):
 
-	@tasks.loop(minutes = 1)
-	async def regeneration(self):
-		for i in cam.cached_players:
-
-			player = cam.cached_players[i][0]
-
-			split_heal = math.ceil(player.body.max_health / 15)
-
-			for o in player.body.body_parts:
-				if not o.is_alive():
-					o.resurrect()
-
-				if o.is_injured():
-					o.heal_part(split_heal)
-
-			player.body.update_state()
-			player.body.update_injury_multiplier()
-
-class CombatManager:
-	def __init__(self, channel):
-		self.channel = channel
-		self.responder = responders[self.channel]
-		self.image_generator = ImageGenerator()
-
-	def get_stan(self, channel):
-		stan = cam.get_stan(channel.id)
-
-		if stan == None:
-			stan = Stan(channel.id)
-			cam.update_stan(stan)
-
-		return stan
+		combatant.body.regenerate()
 
 	def get_player(self, user):
 		player = cam.get_player(user.id)
@@ -298,7 +267,24 @@ class CombatManager:
 			player = Player(user.id, user.name)
 			cam.update_player(player)
 
+		self.prepare_combatant(player)
 		return player
+
+	def get_stan(self, channel):
+		stan = cam.get_stan(channel.id)
+
+		if stan == None:
+			stan = Stan(channel.id)
+			cam.update_stan(stan)
+
+		self.prepare_combatant(stan)
+		return stan
+
+class CombatManager:
+	def __init__(self, channel):
+		self.channel = channel
+		self.responder = responders[self.channel]
+		self.image_generator = ImageGenerator()
 
 	def get_player_infos(self, messages):
 		player_infos = {}
@@ -306,7 +292,7 @@ class CombatManager:
 
 			weapon = i.content.replace("+combat", "").strip()
 
-			player = self.get_player(i.author)
+			player = ctm.get_player(i.author)
 
 			player_infos[player.uid] = (player, weapon)
 
@@ -321,7 +307,7 @@ class AttackManager(CombatManager):
 		self = AttackManager(channel)
 		self.messages = messages
 
-		self.stan = self.get_stan(channel)
+		self.stan = ctm.get_stan(channel)
 		self.player_infos = self.get_player_infos(self.messages)
 
 		#remove dead players from players
@@ -499,7 +485,7 @@ class StatusManager(CombatManager):
 		self = StatusManager(channel)
 		self.message = message
 
-		self.player = self.get_player(self.message.author)
+		self.player = ctm.get_player(self.message.author)
 
 		if self.player == None:
 			self.player = self.create_player(self.message.author)
@@ -847,6 +833,8 @@ class Body:
 
 		self.injury_multiplier = 1
 
+		self.last_update_time = datetime.now()
+
 		self.uid = uid
 
 	def get(self, attrname):
@@ -873,7 +861,7 @@ class Body:
 			name = info.split(",")[0]
 			health = int(info.split(",")[1])
 
-			self.set(i, Body_Part(name, health))
+			self.set(i, Body_Part(self, name, health))
 			self.body_parts.append(self.get(i))
 
 		for i in list(vars(self).keys())[0:28]:
@@ -909,6 +897,68 @@ class Body:
 			number += i.health
 		return number
 
+	def regenerate(self):
+
+		for i in self.body_parts:
+			if not i.is_alive():
+				difference = datetime.now() - i.last_update_time
+				seconds = difference.total_seconds()
+				if seconds >= 600:
+					i.resurrect()
+
+		difference = datetime.now() - self.last_update_time
+		seconds = difference.total_seconds()
+
+		ratio = seconds / 3600
+
+		health_to_regenerate = round(ratio * self.max_health)
+		health_regenerated = 0
+
+		injured_parts = []
+
+		for i in self.body_parts:
+			if i not in injured_parts and i.is_injured():
+				injured_parts.append(i)
+
+		if len(injured_parts) < 1:
+			return
+
+		split_health = round(health_to_regenerate / len(injured_parts))
+
+		parts_that_need_more = []
+
+		for i in injured_parts:
+
+			needed_health = i.max_health - i.health
+
+			if split_health >= needed_health:
+				i.heal_part(needed_health)
+				health_regenerated += needed_health
+			else:
+				i.heal_part(split_health)
+				health_regenerated += needed_health
+				parts_that_need_more.append(i)
+
+		for i in parts_that_need_more:
+
+			if health_regenerated < health_to_regenerate:
+				needed_health = i.max_health - i.health
+
+				if health_regenerated + needed_health >= health_to_regenerate:
+					health = health_to_regenerate - health_regenerated
+					i.heal_part(health)
+					health_regenerated += health
+				else:
+					i.heal_part(needed_health)
+					health_regenerated += needed_health
+
+		self.update_all()
+
+	def update_all(self):
+		self.update_injury_multiplier()
+		self.update_state()
+		self.update_time_record()
+
 	def update_injury_multiplier(self):
 		num =  (self.get_current_total_health() - 500) / (self.max_health - 500)
 		self.injury_multiplier = num
@@ -925,11 +975,19 @@ class Body:
 
 		return self.state
 
+	def update_time_record(self):
+
+		self.last_update_time = datetime.now()
+
 	def is_alive(self):
 		if self.state == State.ALIVE:
 			return True
-		else:
-			return False
+		return False
+
+	def is_injured(self):
+		if self.get_current_total_health() < self.max_health and self.is_alive():
+			return True
+		return False
 
 	def delete(self):
 		for i in self.body_parts:
@@ -938,10 +996,12 @@ class Body:
 
 class Body_Part:
 
-	def __init__(self, name, max_health):
+	def __init__(self, body, name, max_health):
+		self.body = body
 		self.name = name
 		self.max_health = max_health
 		self.health = self.max_health
+		self.last_update_time = datetime.now()
 		self.dependent_parts = []
 		self.related_parts = []
 		self.state = State.ALIVE
@@ -956,18 +1016,28 @@ class Body_Part:
 		return True
 
 	def is_injured(self):
-		if self.health < self.max_health:
+		if self.health < self.max_health and self.is_alive():
 			return True
 		return False
 
+	def update_all(self):
+		self.update_time_record()
+		self.body.update_all()
+
+	def update_time_record(self):
+
+		self.last_update_time = datetime.now()
+
 	def damage_part(self, damage):
 		self.health -= damage
+		self.update_all()
 		return self.health
 
 	def heal_part(self, amount):
 		self.health = self.health + amount
 		if self.health > self.max_health:
 			self.health = self.max_health
+		self.update_all()
 		return self.health
 
 	def resurrect(self):
@@ -975,6 +1045,7 @@ class Body_Part:
 			return
 		self.change_state(State.ALIVE)
 		self.health = 1
+		self.update_all()
 
 	def die(self):
 		dead_parts = [self]
@@ -997,21 +1068,6 @@ class Player(Combatant):
 	def __init__(self, uid, name):
 		super().__init__(uid, 0)
 		self.name = name
-
-	# player cant be pickled if this is here
-	# needs to be handled by something else
-	# @tasks.loop(seconds=120.0)
-	# async def health_update(self):
-	# 	for i in self.body.body_parts:
-	# 		if not i.is_alive():
-	# 			i.resurrect()
-	# 			continue
-	# 		elif i.is_injured():
-	# 			if random.randrange(0, 3) == 1:
-	# 				i.heal_part(random.randrange(i.max_health))
-
-	# 	self.body.update_state()
-	# 	self.body.update_injury_multiplier()
 
 	async def get_user(self):
 		if self.uid != 0:
@@ -1129,9 +1185,6 @@ class Attack:
 				if i.health < 1:
 					self.killed_parts.extend(i.die())
 
-			self.body_attacked.update_injury_multiplier()
-			self.body_attacked.update_state()
-
 		else:
 			if initial_weapon != "":
 				self.weapon = self.attribute_name + " " + initial_weapon
@@ -1156,7 +1209,3 @@ class Attack:
 				i.damage_part(split_damage)
 				if i.health < 1:
 					self.killed_parts.extend(i.die())
-
-			self.body_attacked.update_injury_multiplier()
-
-
