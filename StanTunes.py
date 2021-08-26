@@ -1,269 +1,149 @@
 import discord
 import random
 import time
+import queue
 import asyncio
-import hashlib
-import os
+import discord
 import youtube_dl
-import numpy
-import math
-import pickle
+from datetime import datetime
 from enum import Enum
 from discord.ext import tasks
 
 from Config import *
 from StanLanguage import *
 
+youtube_dl.utils.bug_reports_message = lambda: ''
+
+ytdl_format_options = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0' # bind to ipv4 since ipv6 addresses cause issues sometimes
+}
+
+ffmpeg_options = {
+    'options': '-vn'
+}
+
+ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+
 def tunes_init():
 	global voice_players
-	global songs
-	voice_players = []
-	songs = []
+	voice_players = {}
 
-	global ydl
-	global yi
-	ydl_opts = {
-	"cookiefile":"cookies.txt",
-	"outtmpl":"cache/%(id)s.%(ext)s",
-	"format": "bestaudio/best",
-	"postprocessors": [{
-	"key": "FFmpegExtractAudio",
-	"preferredcodec": "mp3",
-	"preferredquality": "192"
-	}]}
-	yi_opts = {
-	"cookiefile":"cookies.txt",
-	}
+async def tunes_query(ctx, url):
 
-	ydl = youtube_dl.YoutubeDL(ydl_opts)
-	yi = youtube_dl.YoutubeDL(yi_opts)
+	user = ctx.author
+	guild = ctx.guild
+	voice_channel = user.voice.channel
 
-	loop_short.start()
-	loop_long.start()
+	if voice_channel == None:
+		return
 
-async def tunes_query(message):
-	member = message.author
-	text_channel = message.channel
-	voice_channel = None
 	voice_player = None
-	infos = []
-	songs_to_play = []
-	already_playing = False
-	loop = False
-
-	#get the user who requested to play's voice channel and error if they arent in one
-	if member.voice == None or member.voice.channel == None:
-		await text_channel.send("Join a voice channel first, fagola.")
-		return
+	if voice_channel.id in voice_players:
+		voice_player = voice_players[voice_channel.id]
 	else:
-		voice_channel = member.voice.channel
+		voice_client = None
+		for i in client.voice_clients:
+			if i.channel == voice_channel:
+				voice_client = i
 
-	link = message.content.split()[2]
-
-	if link == "loop":
-		loop = True
-
-	if (not loop) and (not link.startswith("https://www.youtube.com/watch")) and (not link.startswith("https://youtu.be/")) and (not link.startswith("https://www.youtube.com/playlist")):
-		await text_channel.send("Give me an actual link, retard.")
-		return
-
-	#check if stan is already connected to the user's channel
-	already_connected = False
-	for i in client.voice_clients:
-		if i.channel == voice_channel:
-			already_connected = True
-
-	#connect to the user's voice channel if stan wasn't connected
-	if not already_connected:
-		await voice_channel.connect()
-
-	#get the voice client corresponding to the user's voice channel
-	voice_client = None
-	for i in client.voice_clients:
-		if i.channel == voice_channel:
-			voice_client = i
-
-	#if for some reason a voice client couldnt be found for the user's voice channel, then something fucked up above and stan errors
-	if voice_client == None:
-		await text_channel.send("I shit myself")
-		return
-
-	await message.channel.trigger_typing()
-
-	for i in voice_players:
-		if i.voice_client == voice_client:
-			voice_player = i
-			if voice_player.is_playing():
-				already_playing = True
-			break
-
-	if voice_player == None:
-		voice_player = Voice_Player(voice_client)
-		voice_players.append(voice_player)
-
-	if loop:
-		await tunes_loop(text_channel, voice_player)
-		return
-
-	info = yi.extract_info(link, download=False)
-
-	if "entries" in info:
-		for i in info["entries"]:
-			if i not in infos:
-				infos.append(i)
-	else:
-		if info not in infos:
-			infos.append(info)
-
-	for i in infos:
-		for o in songs:
-			if i["id"] == o.id:
-				infos.remove(i)
-				songs_to_play.append(o)
-				voice_player.add_song(o)
-
-	for i in infos:
-		link = "https://www.youtube.com/watch?v=" + i["id"]
-		loop = asyncio.get_event_loop()
-		method = ydl.download
-		args = [link]
-		await loop.run_in_executor(None, method, args)
-		new_song = Song(i)
-		songs_to_play.append(new_song)
-		voice_player.add_song(new_song)
-
-	if not already_playing:
-		await echo_songs(message.channel, songs_to_play, False)
-	else:
-		await echo_songs(message.channel, songs_to_play, True)
-
-async def tunes_loop(text_channel, voice_player):
-
-	if len(voice_player.songs) < 1 or not voice_player.is_playing():
-		await text_channel.send("Loop what faggot.")
-		return
-
-	voice_player.toggle_loop()
-
-	await text_channel.send("Looping...")
-
-async def echo_songs(channel, songs, queued=False):
-	names = []
-	for i in songs:
-		names.append(i.name)
-
-	composite = get_composite_noun(names)
-
-	if queued:
-		await channel.send("Queued: " + composite + ".")
-	else:
-		await channel.send("Playing: " + composite + ".")
-
-@tasks.loop(seconds = 60)
-async def loop_short():
-
-	for i in voice_players:
-		if not i.is_playing() and not i.paused:
-			disconnected = False
-			while not disconnected:
-				try:
-					if i.voice_client == None:
-						break
-					await i.voice_client.disconnect()
-					disconnected = True
-				except:
-					pass
-
-@tasks.loop(seconds = 600)
-async def loop_long():
-
-	all_current_songs = []
-	for i in voice_players:
-		all_current_songs.extend(i.songs)
-
-	for i in songs:
-		if i not in all_current_songs:
-			i.remove()
-
-class Voice_Player():
-	def __init__(self, voice_client):
-		self.voice_client = voice_client
 		if voice_client == None:
-			del self
+			try:				
+				voice_client = await voice_channel.connect()
+			except:
+				return
+
+		voice_player = VoicePlayer(voice_client)
+		voice_players[voice_channel.id] = voice_player
+
+	song = await YTDLSource.from_url(url, stream=True)
+
+	voice_player.add_song(song)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+
+	def __init__(self, source, *, data, volume=0.5):
+		super().__init__(source, volume)
+
+		self.data = data
+
+		self.title = data.get('title')
+		self.url = data.get('url')
+
+	@classmethod
+	async def from_url(cls, url, *, loop=None, stream=False):
+		loop = loop or asyncio.get_event_loop()
+		data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
+		if 'entries' in data:
+			# take first item from a playlist
+			data = data['entries'][0]
+
+		filename = data['url'] if stream else ytdl.prepare_filename(data)
+		return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+
+class VoicePlayer:
+	def __init__(self, voice_client):
+		if voice_client == None:
 			return
-		self.songs = songs
-		self.paused = False
+		self.voice_client = voice_client
+		self.channel = voice_client.channel
+		self.songs = queue.Queue()
 		self.loop = False
-		self.current_song = None
+		self.initialized = False
+		self.end.start()
+
+	@tasks.loop(seconds = 30)
+	async def end(self):
+		if self.initialized and self.voice_client and not self.voice_client.is_playing():
+			await self.voice_client.disconnect()
+
+		elif self.voice_client == None:
+			self.delete()
 
 	def play_next(self):
-		if self.voice_client == None:
-			self.remove()
+		song = None
+		try:
+			song = self.songs.get(block=False)
+		except:
+			self.delete()
 			return
 
-		if not self.loop:
-			self.current_song = self.songs[0]
-			if self.current_song != None:
-				self.voice_client.play(self.current_song.audio, after=self.audio_ended)
-			self.songs.remove(self.current_song)
+		if self.loop:
+			self.add_song(song)
+
+		self.play_song(song)
+
+	def add_song(self, song):
+
+		self.songs.put(song, block=False)
+
+		if not self.initialized:
+			self.initialized = True
+			self.play_next()
+
+	def play_song(self, song):
+		if self.voice_client != None:
+			self.voice_client.play(song, after=self.on_end)
 		else:
-			if self.current_song != None:
-				self.songs.append(self.current_song)
-			self.current_song = self.songs[0]
-			if self.current_song != None:
-				self.voice_client.play(self.current_song.audio, after=self.audio_ended)
-			self.songs.remove(self.current_song)
+			self.delete()
 
-	def audio_ended(self, error):
-		if len(self.songs) < 1:
-			return
+	def on_end(self, error):
 
 		self.play_next()
 
-	def add_song(self, song):
-		if song:
-			self.songs.append(song)
+	def delete(self):
+		if voice_players[self.channel.id] == self:
+			del voice_players[self.channel.id]
 
-		if not self.is_playing() and not self.paused:
-			self.play_next()
-
-	def add_songs(self, songs):
-		if songs:
-			self.songs.extend(songs)
-
-		if not self.is_playing() and not self.paused:
-			self.play_next()
-
-	def toggle_loop(self):
-		if self.loop:
-			self.loop = False
-		else:
-			self.loop = True
-
-	def is_playing(self):
-		if self.voice_client.is_playing():
-			return True
-		return False
-
-	def remove(self):
-		voice_players.remove(self)
 		del self
 
-class Song():
-	def __init__(self, info):
-		self.id = info["id"]
-		self.name = info["title"]
-		self.filename = "cache/" + self.id + ".mp3"
-
-		if not os.path.isfile(self.filename):
-			del self
-			return
-
-		self.audio = discord.FFmpegPCMAudio(self.filename)
-		songs.append(self)
-
-
-	def remove(self):
-		os.remove(self.filename)
-		songs.remove(self)
-		del self

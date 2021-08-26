@@ -62,7 +62,7 @@ async def combat(ctx):
 		return
 
 	await ctx.channel.trigger_typing()
-	await query(QueryType.ATTACK, ctx.channel, ctx.message)
+	await combat_query(QueryType.ATTACK, ctx.channel, ctx.message)
 
 @client.command(name="combat-status")
 async def combat_status(ctx):
@@ -78,7 +78,7 @@ async def combat_status(ctx):
 		await ctx.send("I can't do that here, retard.")
 		return
 
-	await query(QueryType.STATUS, ctx.channel, ctx.message)
+	await combat_query(QueryType.STATUS, ctx.channel, ctx.message)
 
 @client.command(name="combat-ability")
 async def combat_ability(ctx):
@@ -94,20 +94,20 @@ async def combat_ability(ctx):
 		await ctx.send("I can't do that here, retard.")
 		return
 
-	await query(QueryType.ABILITY, ctx.channel, ctx.message)
+	await combat_query(QueryType.ABILITY, ctx.channel, ctx.message)
 
 @client.command(name="combat-reset-stan")
 @commands.check(is_admin)
 async def combat_reset_stan(ctx):
 
-	await query(QueryType.RESET_STAN, ctx.channel, ctx.message)
+	await combat_query(QueryType.RESET_STAN, ctx.channel, ctx.message)
 
 @client.command()
 async def play(ctx, arg):
 	if arg == None:
 		return
 
-	await tunes_query(ctx.message)
+	await tunes_query(ctx, arg)
 
 @client.command()
 async def sussify(ctx, *, arg):

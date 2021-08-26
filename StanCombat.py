@@ -69,7 +69,7 @@ def combat_init():
 	cam = CacheManager()
 	ctm = CombatantManager()
 
-async def query(querytype, channel, message):
+async def combat_query(querytype, channel, message):
 
 	if querytype == QueryType.ATTACK:
 		if channel not in handlers:
